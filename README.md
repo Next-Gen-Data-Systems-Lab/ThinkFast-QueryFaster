@@ -1,57 +1,192 @@
-# ThinkFast-QueryFaster
+# Batched classification vs. agentic search
 
 Proposal document: https://www.overleaf.com/project/6ac8329001f35b6ac41611bb
 
+**Question.** For a query that asks for *all* matching documents, when is it
+better to classify every document in parallel than to let an LLM agent search
+iteratively?
 
-Mid term Project Plan:
+Four execution arms behind one interface:
 
-Open-source Jev-style classification vs. agentic search
+| Arm | What it does | Cost shape | Owner |
+|---|---|---|---|
+| `agent` | iterative LLM search, reason → search → inspect → repeat | serial in steps | Nida |
+| `classify` | one forward pass per (query, document) pair, batched | `O(N)` calls, parallel | Nabanita |
+| `ann` | embed the corpus, retrieve top-k by similarity | `O(log N)`, no model calls | Ayesha |
+| `hybrid` | ANN for candidates, then classify those k | `O(k)` calls | Ayesha |
 
-Project goal
-Study when parallel document classification can outperform an LLM search agent on semantic retrieval. Before the Nov 10 midway check, we need a clear experiment design and initial feasibility results.
-1. Experiment design
-Research question
-For a query that asks for all matching documents, when is it faster to classify every document in parallel than to use an LLM agent that searches iteratively? 
+---
 
-What are the tradeoffs in recall, latency, throughput, and GPU resource use?
-Approach A: Conventional LLM search agent
-An open-weight LLM reasons about the query, calls a keyword or vector search tool, examines results, and may search again. We will choose an LLM and inspect an open-source inference engine to understand prefill, token decoding, batching, and GPU behavior. Estimate tool-call and repeated-step costs. 
-We do not need to build a full search agent before November 10. 
-An agent also needs a way to check whether it found all matching documents. For this, we would need to look for a dataset with these properties.
-Approach B: Open-source Jev-like classifier
-For each document, evaluate the pair (query, document) and return match or no match. 
-Independent decisions can be batched on a GPU. Aggregate the matching document IDs. We will test an open-source alternative such as Laya or Kev. 
+## Quick start
 
-These models are candidates, not confirmed drop-in replacements for Jev. Feel free to suggest others.
-Dataset and queries
-Select a small, publicly available document corpus that is easy to download and check. Possible options include research abstracts, public reports, or course descriptions. 
-Use simple keyword queries, multi-condition queries, and semantic queries. 
-For example, search for documents about GPU scheduling that also discuss memory limits. 
-Avoid criteria that cannot be verified from the document text.
-What we will vary and measure
-Vary corpus size, document length, query complexity, and classifier batch size. For the initial pilot, we aim for about 30 to 50 documents, a few queries, and small batch sizes. 
-Measure classifier latency, documents per second, and GPU memory use. If profiling tools are available, record utilization as well. 
-For a small labeled subset, measure precision and recall. Keep model quality and speed separate.
-Use the same document and query set across comparisons. Label agent latency as an analytical estimate unless it is actually measured. 
-Record hardware, model version, prompts, and input lengths so results are reproducible.
-2. Simple performance model
-Agent latency: T_agent ≈ sum over steps of (prefill time + generated tokens × decode time + tool-call time).
-Classifier latency: T_parallel ≈ ceil(number of documents / effective batch size) × time per batch + aggregation time.
-These are starting approximations. Real batching, memory bandwidth, context lengths, and retrieval completeness will affect the comparison. The central output later will be a crossover plot showing which approach is preferable under different assumptions.
-3. Work division
-Nida - LLM model selection and inference engine research
-1. Shortlist 2 or 3 open-weight LLMs suitable for the agentic search baseline. Compare size, context window, license, and GPU requirements.
-2. Find a suitable open-source LLM inference engine, such as vLLM or SGLang. Check source code access, prefill and decode handling, batching, KV cache, and profiling support.
-3. Recommend one LLM and serving setup. Outline how a search agent would use the LLM, call retrieval tools, and incur model and tool-call latency. 
-Midway deliverable: one recommended LLM and inference engine, key implementation notes, and a simple outline of agent search costs. No coding required.
-Nabanita - Open-source classifier feasibility
-1. Pick a practical open-source Jev-style classifier, such as Laya or Kev, and set it up on available hardware.
-2. Run one query-document classification example on available hardware and document how to reproduce it.
-3. If setup permits, compare single-item inference with a small batch. Record latency and hardware/model details.
-Midway deliverable: working minimal demo, setup notes, and any initial timings. Full GPU profiling and large-scale benchmarks can wait.
-Aysha - Pilot dataset, comparison plan, and midway synthesis 
-1. Select a small document corpus/dataset and write representative queries. 
-2. Define the comparison table and evaluation metrics. 
-3. Prepare a brief midway-check summary: what we tested, preliminary observations, limitations, and questions for the instructor.
-Midway deliverable: small pilot query set, evaluation plan, and discussion notes. 
+Offline, no GPU, no downloads — exercises the whole pipeline in about ten
+seconds:
 
+```bash
+pip install numpy scikit-learn pandas matplotlib
+
+python -m src.runner --dataset synthetic --arms classify,ann,hybrid \
+    --model mock --embed-backend tfidf \
+    --corpus-sizes 500,1000,2000 --batch-sizes 32,128,512 \
+    --out results/smoke.jsonl
+
+python -m src.analyze --results results/smoke.jsonl --outdir figs
+```
+
+Run this before every CHTC submit. It catches typos in seconds rather than
+after a model has spent ten minutes loading onto a GPU.
+
+## The midterm run (CHTC)
+
+```bash
+mkdir -p logs
+condor_submit chtc/midterm.sub
+```
+
+Two lines in `chtc/midterm.sub` are marked `<--` and should be checked against
+current CHTC docs before the first submit: the container image tag and the GPU
+lab flag.
+
+Equivalent by hand on an interactive GPU session:
+
+```bash
+python -m src.runner --dataset 20newsgroups --arms classify,ann,hybrid \
+    --model Qwen/Qwen2.5-7B-Instruct \
+    --corpus-sizes 1000,5000,10000 --batch-sizes 32,64,128,256 \
+    --k 100 --out results/midterm.jsonl
+
+python -m src.analyze --results results/midterm.jsonl --outdir figs/midterm
+```
+
+Runs are **resumable**: the runner skips any (arm, corpus size, batch size, k,
+query) already present in the output file, so a preempted job picks up where
+it stopped.
+
+---
+
+## Datasets
+
+| Name | Docs | Queries | Relevant/query | Notes |
+|---|---:|---:|---:|---|
+| `20newsgroups` | ~18.8K | 20 | hundreds | Every doc carries a category label, so "find all documents about cryptography" has an **exact** answer set. Ships with scikit-learn. **Primary.** |
+| `nfcorpus` | ~3.6K | ~320 | ~38 | Real IR relevance judgments. Needs `datasets`. Second dataset, for generality. |
+| `synthetic` | any | 5 | N/5 | Offline smoke tests only. Never reported. |
+
+20 Newsgroups is loaded with headers, footers and quoted replies stripped. The
+headers contain the newsgroup name; leaving them in makes the task trivial and
+the measurement meaningless.
+
+---
+
+## How the classifier works
+
+Rather than depending on one vendor checkpoint, we implement the System One
+decision pattern directly on an open-weights model: the prompt ends where the
+answer begins, we generate **exactly one token**, and we read the probability
+mass on "yes" versus "no" from the LM head. One forward pass per pair, no
+autoregressive generation, and a calibrated probability rather than a parsed
+string.
+
+Three reasons this beats chasing a checkpoint in a five-day window:
+
+1. The **same served model** backs the agent arm, so the comparison isolates
+   execution architecture rather than confounding it with model quality.
+2. Model size becomes a free experimental variable — and the thesis is about
+   batch throughput.
+3. No gated downloads, no custom serving stack.
+
+A purpose-built decision model (Laya, JEV-9B, NeoHorse-Jev-4B) swaps in behind
+the same interface later, to confirm the finding is architectural rather than
+specific to one model.
+
+`--batch-sizes` sets vLLM's `max_num_seqs`, which caps concurrent sequences and
+is therefore the effective batch size. It is the **outer** loop in the runner,
+because the engine is expensive to build and `max_num_seqs` is fixed at
+construction.
+
+---
+
+## What the smoke run already shows
+
+From `figs/summary.md` on synthetic data, with k=100:
+
+| Arm | N | Recall | Precision |
+|---|---:|---:|---:|
+| Classify | 2,000 | **1.000** | 1.000 |
+| ANN | 2,000 | 0.250 | 1.000 |
+| Hybrid | 2,000 | 0.250 | 1.000 |
+
+Hybrid recall equals its retrieval ceiling exactly. When a query has more
+relevant documents than `k`, retrieve-then-classify **cannot** reach them no
+matter how good the classifier is — 80% of synthetic queries hit this. Every
+hybrid row records `ann_recall_ceiling` and `k_vs_gold_ratio` so the effect is
+measured rather than inferred.
+
+This is the caveat on "hybrid dominates everywhere", and it is a real result
+for the report: the hybrid wins on throughput but inherits a hard recall cap,
+while the full scan is exhaustive by construction. That is H1's argument,
+visible before any GPU work.
+
+**Caveat:** synthetic data only. The numbers above are a pipeline check, not
+evidence. Real numbers come from the 20 Newsgroups run.
+
+---
+
+## Layout
+
+```
+src/
+  data.py          corpora + query sets + subsampling + fingerprinting
+  metrics.py       ArmResult, set metrics, nDCG, threshold sweep
+  runner.py        experiment driver (resumable, JSONL)
+  analyze.py       figures + markdown tables for the report
+  arms/
+    classify.py    Approach B  (+ MockDecisionModel for offline tests)
+    ann.py         Approaches C and D
+    agent.py       Approach A -- INTERFACE ONLY, see below
+chtc/
+  midterm.sub      HTCondor submit file
+  run.sh           job executable (runs smoke test first)
+```
+
+### The interface (fixed — do not renegotiate)
+
+Every arm returns an `ArmResult`:
+
+```python
+ArmResult(
+    arm="classify",
+    query_id="q_sci.crypt",
+    predicted={"ng00123", ...},     # doc ids the arm says match
+    scores={"ng00123": 0.91, ...},  # optional ranking
+    timing={"total": 4.2, ...},     # seconds per stage
+    counts={"docs_scored": 10000},  # calls, tokens, docs
+    extra={"model": "...", ...},    # anything to record per row
+)
+```
+
+`metrics.flatten()` turns one of these into a JSONL row. Add an arm by writing
+a function that returns `ArmResult` and adding a branch in `runner.py`.
+
+### Agent arm — Nida
+
+`src/arms/agent.py` has the contract written and the driver implemented. Fill
+in `SearchAgent.find` and delete the `NotImplementedError`. Serve the model
+once with `vllm serve` and point both the agent and the classifier at it, so
+they share a backbone and a GPU.
+
+Record `steps` and `stopped_early` on every result. An agent has to guess when
+it is finished; a full scan is exhaustive by construction. Those two columns
+are the evidence for H1, which is the strongest claim in the project.
+
+---
+
+## Open items
+
+- [ ] Confirm the container tag and GPU flag in `chtc/midterm.sub`
+- [ ] Agent arm (Nida) — the arm H1 and H2 are measured against
+- [ ] Sweep `k` for the hybrid arm; the ceiling finding says `k` should scale
+      with expected gold-set size, which is a result worth plotting
+- [ ] Swap exact search for HNSW and report index build and incremental
+      insert cost (the maintenance axis)
+- [ ] Second decision model to show the finding is architectural

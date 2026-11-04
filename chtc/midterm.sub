@@ -1,0 +1,40 @@
+# CS 839 -- midterm GPU run on CHTC
+#
+#   condor_submit chtc/midterm.sub
+#
+# Check the two marked lines against current CHTC docs before the first
+# submit; GPU lab policy and container paths change.
+
+universe                = container
+container_image         = docker://vllm/vllm-openai:v0.6.3     # <-- pin a tag you have tested
+should_transfer_files   = YES
+when_to_transfer_output = ON_EXIT
+
+executable              = chtc/run.sh
+# dataset  model  corpus_sizes  batch_sizes  k  tag
+arguments               = 20newsgroups Qwen/Qwen2.5-7B-Instruct 1000,5000,10000 32,64,128,256 100 midterm
+
+transfer_input_files    = src/, chtc/run.sh, requirements.txt
+transfer_output_files   = results, figs
+
+log                     = logs/$(Cluster)_$(Process).log
+error                   = logs/$(Cluster)_$(Process).err
+output                  = logs/$(Cluster)_$(Process).out
+
+# ---- resources ----------------------------------------------------------
+request_cpus            = 4
+request_memory          = 48GB
+request_disk            = 80GB
+request_gpus            = 1
+
+# A100 (40/80GB) or H200. A 7B model in bf16 needs ~15GB of weights; the rest
+# is KV cache, which is what lets max_num_seqs go high -- and batch size is
+# the variable this project is about, so ask for the big card.
+require_gpus            = (GlobalMemoryMb >= 40000)
++WantGPULab             = true                                  # <-- confirm current CHTC flag
++GPUJobLength           = "long"
+
+# Long enough for four engine builds plus the sweep.
++MaxWallTimeMinutes     = 480
+
+queue 1
