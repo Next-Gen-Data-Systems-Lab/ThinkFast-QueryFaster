@@ -43,6 +43,59 @@ Precision is similar for both, 0.68-0.76.
 **Next:** rehearse the midterm talk (around Nov 10), then work through the plan
 under [Next steps](#next-steps) for the final report (due Dec 7).
 
+### Offline analysis of hybrid plans
+
+Every plan walks the embedding ranking, classifies the first k documents and
+keeps those accepted, so the scan is the plan with k = N. Replaying from saved
+scores reproduces the CHTC rows: same fingerprints, identical top-k, and the same
+classifier scores. `python -m src.access_paths` and `python -m src.crossover` run
+it. All numbers are 20 Newsgroups with Qwen2.5-7B unless stated.
+
+- **Adaptive k does not beat fixed k at equal cost.** Score mass and the largest
+  gap tie it, and estimating answer size from a random sample loses. The yield
+  rule (classify in chunks, stop when the acceptance rate falls below y) ties it.
+- **There is little to gain.** A budget-optimal oracle that sees the answers adds
+  only 0.01-0.04 recall over fixed k on 20 Newsgroups. Answer sizes barely vary
+  there (329-555 at N = 10K), so k has to follow N, not the query. NFCorpus has
+  more headroom at small budgets (0.14 to 0.18 at about 65 documents), but no
+  rule reaches it. This agrees with Meng et al. (SIGIR 2024) on fixed depth.
+- **Settings transfer differently.** Tuned for 80% of the scan's recall on one
+  corpus, then applied unchanged:
+
+  | Tuned on, applied to | Fixed k | k as a share of N | Yield rule |
+  |---|---:|---:|---:|
+  | 20NG 1K, 20NG 10K | 0.21 | **0.83** | 0.63 |
+  | 20NG 10K, NFCorpus | 0.95 | 0.92 | 0.80 |
+  | NFCorpus, 20NG 10K | 0.28 | 0.56 | **0.82** |
+
+  The table shows the share of scan recall reached, at threshold 0.5. A share of
+  N works within a corpus, but only the yield rule reached 80% in both directions
+  across datasets. It undershoots as N grows. That is four pairs, so it is a lead
+  rather than a result.
+- **The threshold matters more than k.** Chosen by leave-one-query-out, t is about
+  1e-8 on 20 Newsgroups. At N = 10K that takes recall from 0.31 to 0.63, precision
+  from 0.76 to 0.59, and F1 from 0.42 to 0.58 (+0.16, 95% CI 0.11 to 0.21). Only
+  0.09% of decisions change between batch sizes 1 and 32. It does not carry over:
+  NFCorpus prefers 0.9, and 1e-8 there gives F1 0.06.
+- **At equal time, the ordered scan beats the agent.** Given the agent's own 5.0 s
+  at N = 10K, it reaches k = 849 and recall 0.256 against 0.087 at threshold 0.5
+  (+0.168, 95% CI 0.112 to 0.232, better on 19 of 20 queries), at precision 0.79
+  against 0.73. N = 5K gives +0.142. At N = 1K the gap is not significant (+0.048,
+  CI -0.003 to 0.099).
+- **Break-even exchange rate:** the agent would match the ordered scan only if a
+  call cost about 11 decisions at N = 10K (6 with the calibrated threshold), not 70.
+  Agent calls were not batched in this number.
+- **Index cost:** on a laptop, the HNSW graph for 10K documents builds in under a
+  second and inserts take 0.11 ms per document. Search keeps at least 99.9% of the
+  exact top k up to k = 3,000 when `ef` is at least k. Embedding is the real cost
+  (6.3 s on the H200), so HNSW changes nothing at this scale.
+
+Related work to cite: ranked list truncation (Choppy, AttnCut, and Meng et al.
+2024 for LLM re-ranking), adaptive-k for RAG (Taguchi et al. 2025), stopping rules
+for technology-assisted review (Cormack and Grossman), and semantic filter
+cascades (LOTUS; Kim et al. 2026). Sources are at the end of
+[Next steps](#next-steps). Only abstracts have been read so far.
+
 ---
 
 ## Quick start
@@ -208,7 +261,11 @@ src/
   metrics.py       ArmResult, set metrics, nDCG, threshold sweep
   runner.py        experiment driver (resumable, JSONL)
   analyze.py       figures + markdown tables for the report
-  summarize_runs.py  numbers across all runs, as used in the midterm deck
+  summarize_runs.py  every number the deck and report use
+  embed_ranks.py   saves all query-document similarities, for offline replay
+  access_paths.py  fixed k, adaptive k, oracle, threshold calibration, transfer
+  crossover.py     performance model, equal-time comparison, exchange rates
+  index_costs.py   HNSW build, insert and deep-k recall (needs hnswlib)
   arms/
     classify.py    Approach B  (+ MockDecisionModel for offline tests)
     ann.py         Approaches C and D
@@ -259,33 +316,30 @@ Done so far:
 - [x] Agent arm — the arm H1 and H2 are measured against
 - [x] Second dataset (NFCorpus) and second model (Qwen2.5-1.5B)
 - [x] Measure the exchange rate (about 70 scan decisions per agent step)
+- [x] Check the ranked list truncation, TAR stopping and semantic filter literature
+- [x] Sweep `k` for the hybrid arm from the saved scores
+- [x] Build and test adaptive k: it does not beat fixed k at equal cost
+- [x] Calibrate the classifier threshold on held-out queries
+- [x] Clean up `src/summarize_runs.py`
+- [x] Swap exact search for HNSW and report index build and insert cost
 
 ### Before the final report (Dec 7)
 
 The two contributions are adaptive k and the exchange rate.
 
-- [ ] Check the ranked list truncation literature, then position adaptive k as
-      cost-based access-path selection
-- [ ] Sweep `k` for the hybrid arm from the saved scores. This is the fixed-k
-      baseline; the ceiling finding says `k` should scale with expected
-      gold-set size
-- [ ] Build adaptive k: predict answer size per query, set `k` from it, and
-      compare against every fixed `k`
 - [ ] Batch agent calls across queries, which would lower the exchange rate
+      (`agentbatch` jobs queued on CHTC)
 - [ ] Fit the performance model and plot the crossover between scan and agent
-- [ ] Calibrate the classifier threshold on held-out queries, using the saved
-      scores
-- [ ] Clean up `src/summarize_runs.py`
+      (`src/crossover.py` is ready for the batched numbers)
+- [ ] Repeat the adaptive k test on the logic queries, where answer sizes vary
 - [ ] Write the final report
 
 ### If time allows
 
-- [ ] Simple keyword and multi-condition queries; all 20 Newsgroups queries are
-      semantic category queries
-- [ ] Document-length sweep
-- [ ] Swap exact search for HNSW and report index build and incremental
-      insert cost (the maintenance axis)
-- [ ] Second decision model to show the finding is architectural
+- [ ] Keyword and multi-condition queries (`20newsgroups_logic`, job queued)
+- [ ] Document-length sweep (`len*` jobs queued)
+- [ ] Second decision model to show the finding is architectural (Phi-3.5-mini,
+      job queued)
 
 ### Future work
 
@@ -297,3 +351,12 @@ Not planned before Dec 7:
 - Update rate
 
 We are skipping the confidence cascade because it is too close to JEVDB.
+
+### Sources
+
+- [Choppy](https://arxiv.org/abs/2004.13012), [AttnCut](https://arxiv.org/abs/2102.12793)
+- [Ranked List Truncation for LLM-based Re-Ranking](https://arxiv.org/abs/2404.18185)
+- [Adaptive-k](https://arxiv.org/abs/2506.08479)
+- [Heuristic Stopping Rules for TAR](https://arxiv.org/abs/2106.09871)
+- [Semantic Operators (LOTUS)](https://arxiv.org/abs/2407.11418)
+- [Fast LLM-Based Semantic Filtering](https://arxiv.org/abs/2606.08090)

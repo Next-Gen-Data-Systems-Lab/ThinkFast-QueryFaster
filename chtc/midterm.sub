@@ -11,6 +11,10 @@
 #
 #   condor_submit ARMS=agent BATCHES=32 TAG=agent chtc/midterm.sub
 #
+# Batched agent, sweeping queries in flight (BATCHES must cover the largest):
+#
+#   condor_submit ARMS=agent BATCHES=64 AGENT_CONCURRENCY=1,4,16 TAG=c chtc/midterm.sub
+#
 # Keep comments on their own lines: condor_submit treats a trailing # as part
 # of the value.
 
@@ -46,6 +50,14 @@ endif
 if !defined AGENT_STEPS
   AGENT_STEPS = 8
 endif
+# Queries in flight for the agent arm; none runs them one at a time.
+if !defined AGENT_CONCURRENCY
+  AGENT_CONCURRENCY = none
+endif
+# Documents are cut to this many characters.
+if !defined MAX_CHARS
+  MAX_CHARS = 2000
+endif
 # Regular expression on the device name, e.g. GPU=H200 to keep runs comparable.
 if !defined GPU
   GPU = A100|H200
@@ -61,7 +73,7 @@ should_transfer_files   = YES
 when_to_transfer_output = ON_EXIT_OR_EVICT
 
 executable              = chtc/run.sh
-arguments               = $(DATASET) $(MODEL) $(SIZES) $(BATCHES) $(K) $(TAG) $(ARMS) $(MAX_QUERIES) $(AGENT_STEPS)
+arguments               = $(DATASET) $(MODEL) $(SIZES) $(BATCHES) $(K) $(TAG) $(ARMS) $(MAX_QUERIES) $(AGENT_STEPS) $(AGENT_CONCURRENCY) $(MAX_CHARS)
 
 transfer_input_files    = src, chtc/run.sh, requirements.txt
 transfer_output_files   = results, figs

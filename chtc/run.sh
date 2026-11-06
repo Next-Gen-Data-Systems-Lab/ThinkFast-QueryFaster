@@ -54,6 +54,10 @@ TAG="${6:-run}"
 ARMS="${7:-classify,ann,hybrid}"
 MAX_QUERIES="${8:-0}"
 AGENT_STEPS="${9:-8}"
+# "none" keeps the one-at-a-time agent; otherwise a sweep such as 1,4,16.
+AGENT_CONCURRENCY="${10:-none}"
+[[ "$AGENT_CONCURRENCY" == none ]] && AGENT_CONCURRENCY=""
+MAX_CHARS="${11:-2000}"
 
 OUT="results/${DATASET}_${TAG}.jsonl"
 echo "=== dataset=$DATASET model=$MODEL sizes=$SIZES batches=$BATCHES k=$K arms=$ARMS ==="
@@ -63,7 +67,7 @@ echo "=== dataset=$DATASET model=$MODEL sizes=$SIZES batches=$BATCHES k=$K arms=
 echo "=== smoke test (mock model, no GPU) ==="
 python3 -m src.runner --dataset synthetic --arms classify,ann,hybrid,agent \
     --model mock --embed-backend tfidf \
-    --corpus-sizes 300 --batch-sizes 32 --k 50 \
+    --corpus-sizes 300 --batch-sizes 32 --k 50 --agent-concurrency 1,3 \
     --out results/_smoke.jsonl
 echo "=== smoke test passed ==="
 
@@ -89,6 +93,8 @@ for BS in "${BATCH_LIST[@]}"; do
         --k "$K" \
         --max-queries "$MAX_QUERIES" \
         --agent-max-steps "$AGENT_STEPS" \
+        --agent-concurrency "$AGENT_CONCURRENCY" \
+        --max-chars "$MAX_CHARS" \
         --out "$OUT" \
         --scores-out "$SCORES"
 done

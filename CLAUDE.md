@@ -23,7 +23,9 @@ Keep this file and `README.md` updated with progress as work happens.
   classification decisions) and adaptive k. Query rewriting is future work. Skip
   the confidence cascade, which is too close to JEVDB.
 - Position adaptive k as cost-based access-path selection, and check the ranked
-  list truncation literature first.
+  list truncation literature first. Done: the test came back negative, so report
+  it as a negative result with the oracle bound. The strongest finding is the
+  scan in embedding order beating the agent at equal time.
 
 ## Running on CHTC
 
@@ -38,7 +40,7 @@ condor_submit BATCHES=32 TAG=name GPU='H200$' LENGTH=short chtc/midterm.sub
 ```
 
 Submit-time options: `DATASET MODEL SIZES BATCHES K TAG ARMS MAX_QUERIES
-AGENT_STEPS GPU LENGTH`.
+AGENT_STEPS AGENT_CONCURRENCY MAX_CHARS GPU LENGTH`.
 
 ## Things that have broken before
 
@@ -64,6 +66,11 @@ AGENT_STEPS GPU LENGTH`.
 - The resume key must match the row: only `ann` and `hybrid` store `k`.
 - `--scores-out` saves per-document scores, so thresholds and hybrid at other
   values of k can be evaluated without another GPU run.
+- Hybrid plans replay offline: `src.embed_ranks` saves the ranking (needs
+  sentence-transformers), then `src.access_paths` and `src.crossover` use the
+  saved scores. Compare rules with fixed k at equal mean cost, never by eye.
+- `SearchAgent._steps` is a generator, so `find` and `run_many` share one loop.
+  A batched row's `wall_s` is latency; cost is `batch_wall_s` over calls.
 - The local test command is in the README quick start. There is no system
   `timeout` command on this Mac.
 

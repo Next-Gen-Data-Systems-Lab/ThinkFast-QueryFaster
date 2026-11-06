@@ -187,6 +187,46 @@ def load_20newsgroups(max_chars: int = 2000, strip_metadata: bool = True) -> Cor
     )
 
 
+# Query shapes beyond one semantic category, on the same documents. Every gold
+# set is still complete, because it comes from category labels and from exact
+# word matches on the text the classifier sees.
+KEYWORDS = ("encryption", "nasa", "bible", "helmet", "monitor", "insurance",
+            "israel", "goalie", "compiler", "battery")
+EITHER = (("rec.sport.baseball", "rec.sport.hockey"), ("rec.autos", "rec.motorcycles"),
+          ("comp.sys.ibm.pc.hardware", "comp.sys.mac.hardware"),
+          ("alt.atheism", "soc.religion.christian"),
+          ("talk.politics.guns", "talk.politics.mideast"))
+BOTH = (("rec.autos", "insurance"), ("sci.space", "shuttle"), ("sci.crypt", "clipper"),
+        ("sci.med", "cancer"), ("talk.politics.guns", "nra"), ("rec.sport.hockey", "toronto"))
+BUT_NOT = (("rec.sport.baseball", "yankees"), ("sci.space", "nasa"),
+           ("comp.graphics", "jpeg"), ("sci.crypt", "clipper"))
+
+
+def _has_word(word: str):
+    pattern = re.compile(rf"\b{re.escape(word)}\b", re.IGNORECASE)
+    return lambda text: bool(pattern.search(text))
+
+
+def load_20newsgroups_logic(max_chars: int = 2000) -> Corpus:
+    """The same documents, with keyword and multi-condition queries."""
+    base = load_20newsgroups(max_chars=max_chars)
+    cats = {q.id.removeprefix("q_"): q for q in base.queries}
+
+    def containing(word: str) -> frozenset[str]:
+        has = _has_word(word)
+        return frozenset(d.id for d in base.docs if has(d.text))
+
+    queries = [Query(f"kw_{w}", f'documents that contain the word "{w}"', containing(w))
+               for w in KEYWORDS]
+    queries += [Query(f"or_{a}+{b}", f"{cats[a].text}; or {cats[b].text}",
+                      cats[a].gold | cats[b].gold) for a, b in EITHER]
+    queries += [Query(f"and_{c}+{w}", f'{cats[c].text}, and that contain the word "{w}"',
+                      cats[c].gold & containing(w)) for c, w in BOTH]
+    queries += [Query(f"not_{c}+{w}", f'{cats[c].text}, but that do not contain the word "{w}"',
+                      cats[c].gold - containing(w)) for c, w in BUT_NOT]
+    return Corpus(name="20newsgroups_logic", docs=base.docs, queries=queries, meta=base.meta)
+
+
 # --------------------------------------------------------------------------
 # NFCorpus (BEIR)
 # --------------------------------------------------------------------------
@@ -276,6 +316,7 @@ def load_synthetic(n_docs: int = 2000, doc_words: int = 120, seed: int = 0) -> C
 
 LOADERS = {
     "20newsgroups": load_20newsgroups,
+    "20newsgroups_logic": load_20newsgroups_logic,
     "nfcorpus": load_nfcorpus,
     "synthetic": load_synthetic,
 }

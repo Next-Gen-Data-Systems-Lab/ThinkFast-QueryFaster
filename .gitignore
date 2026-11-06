@@ -1,3 +1,5 @@
+results/*.npz
+results/*.json
 results/*.jsonl
 hf/
 __pycache__/

@@ -26,7 +26,16 @@ So that a classifier win cannot be put down to a weak baseline:
   * The tool never shows a document twice, so repeating a search pages deeper.
   * Each step sees the latest results plus a short summary of the search so
     far, not the whole transcript, which keeps prompts small and steps fast.
-  * Queries run one at a time, so each one has the engine to itself.
+  * By default queries run one at a time, so each one has the engine to itself.
+
+Batching across queries
+-----------------------
+A reasoning step is decode-bound, so one query leaves most of the GPU idle.
+`run_many` keeps several queries in flight and sends their next steps to the
+engine together. That is what a server with many users would do, and it is the
+fair comparison for the exchange rate: GPU seconds per step, not latency.
+Rounds are synchronous, so a round lasts as long as its longest reply. That
+makes the measured gain a lower bound on continuous batching.
 
 Serving
 -------
@@ -40,6 +49,7 @@ from __future__ import annotations
 import json
 import re
 import time
+from collections import deque
 from dataclasses import dataclass
 
 from ..metrics import ArmResult, stopwatch
@@ -71,16 +81,21 @@ class LocalChat:
 
     def chat(self, messages: list[dict], max_tokens: int,
              temperature: float = 0.0) -> ChatReply:
+        return self.chat_many([messages], max_tokens, temperature)[0]
+
+    def chat_many(self, conversations: list[list[dict]], max_tokens: int,
+                  temperature: float = 0.0) -> list[ChatReply]:
+        """One engine call for all conversations. `seconds` is the shared wait."""
         from vllm import SamplingParams
 
-        prompt = self.tok.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True)
+        prompts = [self.tok.apply_chat_template(
+            m, tokenize=False, add_generation_prompt=True) for m in conversations]
         params = SamplingParams(max_tokens=max_tokens, temperature=temperature)
         t0 = time.perf_counter()
-        out = self.llm.generate([prompt], params, use_tqdm=False)[0]
-        return ChatReply(out.outputs[0].text, len(out.prompt_token_ids),
-                         len(out.outputs[0].token_ids),
-                         time.perf_counter() - t0)
+        outs = self.llm.generate(prompts, params, use_tqdm=False)
+        seconds = time.perf_counter() - t0
+        return [ChatReply(o.outputs[0].text, len(o.prompt_token_ids),
+                          len(o.outputs[0].token_ids), seconds) for o in outs]
 
 
 class MockChat:
@@ -100,6 +115,10 @@ class MockChat:
         reply = {"thought": "mock", "keep": keep,
                  "next_search": request if done < self.searches else None}
         return ChatReply(json.dumps(reply), len(text) // 4, 20, 0.0)
+
+    def chat_many(self, conversations: list[list[dict]], max_tokens: int,
+                  temperature: float = 0.0) -> list[ChatReply]:
+        return [self.chat(m, max_tokens, temperature) for m in conversations]
 
 
 def build_chat(decision_model):
@@ -192,7 +211,22 @@ class SearchAgent:
         self.temperature = temperature
 
     def find(self, query_text: str, tool: RetrievalTool) -> tuple[set[str], dict]:
-        """Return (matching document ids, stats).
+        """Run one query to completion. See `_steps` for what comes back."""
+        steps = self._steps(query_text, tool)
+        try:
+            messages = next(steps)
+            while True:
+                messages = steps.send(self.client.chat(
+                    messages, MAX_REPLY_TOKENS, self.temperature))
+        except StopIteration as done:
+            return done.value
+
+    def _steps(self, query_text: str, tool: RetrievalTool):
+        """Generator: yields messages, receives a ChatReply, returns the answer.
+
+        Keeping the loop free of model calls lets `find` and `run_many` share it.
+
+        Returns (matching document ids, stats).
 
         stats always includes:
             steps           int    search iterations actually taken
@@ -214,11 +248,10 @@ class SearchAgent:
                  "parse_failures": 0}
 
         while True:
-            reply = self.client.chat(
-                [{"role": "system", "content": SYSTEM_PROMPT},
-                 {"role": "user", "content": render_turn(
-                     query_text, len(kept), searches, results)}],
-                MAX_REPLY_TOKENS, self.temperature)
+            reply = yield [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": render_turn(
+                    query_text, len(kept), searches, results)}]
             stats["llm_calls"] += 1
             stats["gen_tokens"] += reply.gen_tokens
             stats["prompt_tokens"] += reply.prompt_tokens
@@ -255,15 +288,10 @@ class SearchAgent:
         return kept, stats
 
 
-def run(agent: SearchAgent, tool: RetrievalTool, query) -> ArmResult:
-    """Run the agent on one query and package the result."""
-    tool.reset()
-    timing: dict[str, float] = {}
-    with stopwatch(timing, "total"):
-        matches, stats = agent.find(query.text, tool)
-
-    timing["tool"] = tool.seconds
-    timing["llm"] = stats.get("llm_seconds", 0.0)
+def package(agent: SearchAgent, tool: RetrievalTool, query, matches: set[str],
+            stats: dict, seconds: float) -> ArmResult:
+    timing = {"total": seconds, "tool": tool.seconds,
+              "llm": stats.get("llm_seconds", 0.0)}
     return ArmResult(
         arm="agent",
         query_id=query.id,
@@ -285,3 +313,57 @@ def run(agent: SearchAgent, tool: RetrievalTool, query) -> ArmResult:
             "stopped_early": bool(stats.get("stopped_early", False)),
         },
     )
+
+
+def run(agent: SearchAgent, tool: RetrievalTool, query) -> ArmResult:
+    """Run the agent on one query and package the result."""
+    tool.reset()
+    t0 = time.perf_counter()
+    matches, stats = agent.find(query.text, tool)
+    return package(agent, tool, query, matches, stats, time.perf_counter() - t0)
+
+
+def run_many(agent: SearchAgent, new_tool, queries: list,
+             concurrency: int) -> tuple[list[ArmResult], dict]:
+    """Run queries with up to `concurrency` in flight on one engine.
+
+    `new_tool` makes a RetrievalTool, because each query keeps its own counters.
+    A result's wall time is that query's latency, which overlaps with others, so
+    cost comes from the returned batch stats: wall_s / llm_calls is GPU seconds
+    per step, and that is the number the exchange rate needs.
+    """
+    waiting = deque(queries)
+    active: list[dict] = []
+    results: list[ArmResult] = []
+    rounds = in_flight = 0
+    t0 = time.perf_counter()
+
+    def admit():
+        while waiting and len(active) < concurrency:
+            query, tool = waiting.popleft(), new_tool()
+            steps = agent._steps(query.text, tool)
+            active.append({"query": query, "tool": tool, "steps": steps,
+                           "messages": next(steps),
+                           "start": time.perf_counter()})
+
+    admit()
+    while active:
+        replies = agent.client.chat_many(
+            [a["messages"] for a in active], MAX_REPLY_TOKENS, agent.temperature)
+        rounds += 1
+        in_flight += len(active)
+        still_running = []
+        for a, reply in zip(active, replies):
+            try:
+                a["messages"] = a["steps"].send(reply)
+                still_running.append(a)
+            except StopIteration as done:
+                matches, stats = done.value
+                results.append(package(agent, a["tool"], a["query"], matches, stats,
+                                       time.perf_counter() - a["start"]))
+        active[:] = still_running
+        admit()
+
+    return results, {"batch_wall_s": time.perf_counter() - t0,
+                     "batch_rounds": rounds,
+                     "batch_mean_in_flight": in_flight / rounds if rounds else 0.0}

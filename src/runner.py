@@ -85,7 +85,8 @@ def done_keys(path: Path) -> set[tuple]:
             except json.JSONDecodeError:
                 continue
             keys.add((r.get("arm"), r.get("dataset"), r.get("corpus_size"),
-                      r.get("batch_size"), r.get("k"), r.get("query_id")))
+                      r.get("batch_size"), r.get("k"), r.get("query_id"),
+                      r.get("agent_concurrency")))
     return keys
 
 
@@ -119,12 +120,15 @@ def main(argv=None):
                    help="documents the agent sees per search")
     p.add_argument("--agent-max-steps", type=int, default=8,
                    help="hard cap on agent search iterations")
+    p.add_argument("--agent-concurrency", default="",
+                   help="queries in flight, as a sweep such as 1,4,16; empty "
+                        "runs them strictly one at a time")
     p.add_argument("--threshold", type=float, default=0.5)
     p.add_argument("--max-queries", type=int, default=0,
                    help="0 = all queries in the dataset")
     p.add_argument("--max-chars", type=int, default=2000)
     p.add_argument("--max-model-len", type=int, default=0,
-                   help="0 = 2048, or 4096 when the agent arm runs")
+                   help="0 = 2048, 4096 with the agent arm, 8192 past 2000 characters")
     p.add_argument("--max-num-batched-tokens", type=int, default=0,
                    help=f"vLLM per-step token budget; 0 = batch size x {TOKENS_PER_SEQ}")
     p.add_argument("--gpu-memory-utilization", type=float, default=0.85)
@@ -140,9 +144,15 @@ def main(argv=None):
     args = p.parse_args(argv)
 
     arms = [a.strip() for a in args.arms.split(",") if a.strip()]
-    args.max_model_len = args.max_model_len or (4096 if "agent" in arms else 2048)
+    if not args.max_model_len:
+        # Noisy text can run close to one token per character.
+        args.max_model_len = (8192 if args.max_chars > 2000
+                              else 4096 if "agent" in arms else 2048)
     sizes = [int(x) for x in args.corpus_sizes.split(",") if x.strip()]
     batches = [int(x) for x in args.batch_sizes.split(",") if x.strip()]
+    concurrency = [int(x) for x in args.agent_concurrency.split(",") if x.strip()]
+    if concurrency and max(concurrency) > min(batches):
+        p.error("--agent-concurrency cannot exceed the batch size")
     out = Path(args.out)
     seen = done_keys(out)
     stamp = env_stamp(args)
@@ -208,13 +218,38 @@ def main(argv=None):
                     tool = AG.RetrievalTool(index, docs_by_id, k=args.agent_k)
 
                 for arm in arms:
+                    if arm == "agent" and concurrency:
+                        for c in concurrency:
+                            todo = [q for q in qs if ("agent", sub.name, len(sub.docs),
+                                                      bs, None, q.id, c) not in seen]
+                            if not todo:
+                                continue
+                            rs, batch = AG.run_many(
+                                agent, lambda: AG.RetrievalTool(
+                                    index, docs_by_id, k=args.agent_k), todo, c)
+                            calls = sum(r.counts["llm_calls"] for r in rs)
+                            for r in rs:
+                                row = {**base, "k": None, "agent_concurrency": c,
+                                       **batch, **M.flatten(r, golds[r.query_id])}
+                                writer.write(row)
+                                seen.add(("agent", sub.name, len(sub.docs), bs, None,
+                                          r.query_id, c))
+                            s = M.summarize(rs, golds)
+                            print(f"[runner] agent     n={len(sub.docs):6d} c={c:4d} "
+                                  f"R={s.get('mean_recall', 0):.3f} "
+                                  f"P={s.get('mean_precision', 0):.3f} "
+                                  f"{batch['batch_wall_s'] / calls:.3f} s/step "
+                                  f"in flight {batch['batch_mean_in_flight']:.1f} "
+                                  f"({batch['batch_wall_s']:.1f}s)", flush=True)
+                        continue
+
                     results = []
                     t_arm = time.perf_counter()
                     for q in qs:
                         # Only ann and hybrid use k; the key must match what is
                         # written to the row or resume never skips it.
                         kk = args.k if arm in ("ann", "hybrid") else None
-                        key = (arm, sub.name, len(sub.docs), bs, kk, q.id)
+                        key = (arm, sub.name, len(sub.docs), bs, kk, q.id, None)
                         if key in seen:
                             continue
                         if arm == "classify":
