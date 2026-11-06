@@ -40,8 +40,8 @@ Precision is similar for both, 0.68-0.76.
   best F1. Qwen 1.5B scans about 2.4x faster but ranks much worse. Agent calls
   were not batched across queries.
 
-**Next:** rehearse the midterm talk, then build adaptive k for the final report
-(due Dec 7).
+**Next:** rehearse the midterm talk (around Nov 10), then work through the plan
+under [Next steps](#next-steps) for the final report (due Dec 7).
 
 ---
 
@@ -251,18 +251,49 @@ the evidence for H1, which is the strongest claim in the project.
 
 ---
 
-## Open items
+## Next steps
+
+Done so far:
 
 - [x] Confirm the container tag and GPU flag in `chtc/midterm.sub`
 - [x] Agent arm — the arm H1 and H2 are measured against
 - [x] Second dataset (NFCorpus) and second model (Qwen2.5-1.5B)
+- [x] Measure the exchange rate (about 70 scan decisions per agent step)
+
+### Before the final report (Dec 7)
+
+The two contributions are adaptive k and the exchange rate.
+
+- [ ] Check the ranked list truncation literature, then position adaptive k as
+      cost-based access-path selection
+- [ ] Sweep `k` for the hybrid arm from the saved scores. This is the fixed-k
+      baseline; the ceiling finding says `k` should scale with expected
+      gold-set size
+- [ ] Build adaptive k: predict answer size per query, set `k` from it, and
+      compare against every fixed `k`
+- [ ] Batch agent calls across queries, which would lower the exchange rate
+- [ ] Fit the performance model and plot the crossover between scan and agent
+- [ ] Calibrate the classifier threshold on held-out queries, using the saved
+      scores
+- [ ] Clean up `src/summarize_runs.py`
+- [ ] Write the final report
+
+### If time allows
+
 - [ ] Simple keyword and multi-condition queries; all 20 Newsgroups queries are
       semantic category queries
-- [ ] Batch agent calls across queries, which would lower the exchange rate
 - [ ] Document-length sweep
-- [ ] Calibrate the classifier threshold from the saved scores
-- [ ] Sweep `k` for the hybrid arm; the ceiling finding says `k` should scale
-      with expected gold-set size, which is a result worth plotting
 - [ ] Swap exact search for HNSW and report index build and incremental
       insert cost (the maintenance axis)
 - [ ] Second decision model to show the finding is architectural
+
+### Future work
+
+Not planned before Dec 7:
+
+- Query rewriting: an expensive model decomposes the predicate once and a cheap
+  model executes it N times
+- Laya and Kev behind the same interface
+- Update rate
+
+We are skipping the confidence cascade because it is too close to JEVDB.
