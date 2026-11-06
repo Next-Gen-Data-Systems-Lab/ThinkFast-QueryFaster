@@ -8,12 +8,12 @@ iteratively?
 
 Four execution arms behind one interface:
 
-| Arm | What it does | Cost shape | Owner |
-|---|---|---|---|
-| `agent` | iterative LLM search, reason → search → inspect → repeat | serial in steps | Nida |
-| `classify` | one forward pass per (query, document) pair, batched | `O(N)` calls, parallel | Nabanita |
-| `ann` | embed the corpus, retrieve top-k by similarity | `O(log N)`, no model calls | Ayesha |
-| `hybrid` | ANN for candidates, then classify those k | `O(k)` calls | Ayesha |
+| Arm | What it does | Cost shape |
+|---|---|---|
+| `agent` | iterative LLM search, reason → search → inspect → repeat | serial in steps |
+| `classify` | one forward pass per (query, document) pair, batched | `O(N)` calls, parallel |
+| `ann` | embed the corpus, retrieve top-k by similarity | `O(log N)`, no model calls |
+| `hybrid` | ANN for candidates, then classify those k | `O(k)` calls |
 
 ---
 
@@ -58,8 +58,22 @@ batch sizes, so it also shows whether the sweep changes throughput:
 condor_submit SIZES=1000 BATCHES=32,256 TAG=test chtc/midterm.sub
 ```
 
+To run the search agent, which handles queries one at a time and so needs only
+one batch size:
+
+```bash
+condor_submit ARMS=agent BATCHES=32 TAG=agent chtc/midterm.sub
+```
+
+HTCondor reads `src/` when a job starts, not when it is submitted, so uploading
+to a folder with a queued job changes the code that job will run. To work on
+the code while a job waits, upload somewhere else with
+`REMOTE_DIR=another-folder bash chtc/upload.sh`.
+
 Results come back to `results/` and `figs/` in the project folder on the access
-point. The job only runs on A100 and H200 GPUs; pass `GPU=H200` to pin one type
+point. The last batch size in a run also writes per-document scores to
+`results/<dataset>_<tag>.scores.jsonl`, so thresholds can be re-evaluated
+without another GPU run. The job only runs on A100 and H200 GPUs; pass `GPU=H200` to pin one type
 so throughput numbers stay comparable between runs.
 
 Equivalent by hand on an interactive GPU session:
@@ -158,10 +172,11 @@ src/
   arms/
     classify.py    Approach B  (+ MockDecisionModel for offline tests)
     ann.py         Approaches C and D
-    agent.py       Approach A -- INTERFACE ONLY, see below
+    agent.py       Approach A (+ MockChat for offline tests)
 chtc/
   midterm.sub      HTCondor submit file
   run.sh           job executable (runs smoke test first)
+  upload.sh        copies the project to the access point
 ```
 
 ### The interface (fixed — do not renegotiate)
@@ -183,23 +198,27 @@ ArmResult(
 `metrics.flatten()` turns one of these into a JSONL row. Add an arm by writing
 a function that returns `ArmResult` and adding a branch in `runner.py`.
 
-### Agent arm — Nida
+### Agent arm
 
-`src/arms/agent.py` has the contract written and the driver implemented. Fill
-in `SearchAgent.find` and delete the `NotImplementedError`. Serve the model
-once with `vllm serve` and point both the agent and the classifier at it, so
-they share a backbone and a GPU.
+`src/arms/agent.py` runs the search loop on the same in-process vLLM engine as
+the classifier, so both arms use one model and one job needs no separate server.
+Each step shows the agent up to `--agent-k` unseen documents as 300-character
+snippets, and `--agent-max-steps` caps the search.
 
-Record `steps` and `stopped_early` on every result. An agent has to guess when
-it is finished; a full scan is exhaustive by construction. Those two columns
-are the evidence for H1, which is the strongest claim in the project.
+Every result records `steps` and `stopped_early`. An agent has to guess when it
+is finished; a full scan is exhaustive by construction. Those two columns are
+the evidence for H1, which is the strongest claim in the project.
 
 ---
 
 ## Open items
 
-- [ ] Confirm the container tag and GPU flag in `chtc/midterm.sub`
-- [ ] Agent arm (Nida) — the arm H1 and H2 are measured against
+- [x] Confirm the container tag and GPU flag in `chtc/midterm.sub`
+- [x] Agent arm — the arm H1 and H2 are measured against
+- [ ] Simple keyword and multi-condition queries; all current queries are
+      semantic category queries
+- [ ] Document-length sweep
+- [ ] Calibrate the classifier threshold from the saved scores
 - [ ] Sweep `k` for the hybrid arm; the ceiling finding says `k` should scale
       with expected gold-set size, which is a result worth plotting
 - [ ] Swap exact search for HNSW and report index build and incremental

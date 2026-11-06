@@ -7,6 +7,10 @@
 #
 #   condor_submit SIZES=1000 BATCHES=32,256 TAG=test chtc/midterm.sub
 #
+# Search agent only (it runs queries one at a time, so one batch size is enough):
+#
+#   condor_submit ARMS=agent BATCHES=32 TAG=agent chtc/midterm.sub
+#
 # Keep comments on their own lines: condor_submit treats a trailing # as part
 # of the value.
 
@@ -28,6 +32,9 @@ endif
 if !defined TAG
   TAG = midterm
 endif
+if !defined ARMS
+  ARMS = classify,ann,hybrid
+endif
 # Regular expression on the device name, e.g. GPU=H200 to keep runs comparable.
 if !defined GPU
   GPU = A100|H200
@@ -43,7 +50,7 @@ should_transfer_files   = YES
 when_to_transfer_output = ON_EXIT_OR_EVICT
 
 executable              = chtc/run.sh
-arguments               = $(DATASET) $(MODEL) $(SIZES) $(BATCHES) $(K) $(TAG)
+arguments               = $(DATASET) $(MODEL) $(SIZES) $(BATCHES) $(K) $(TAG) $(ARMS)
 
 transfer_input_files    = src, chtc/run.sh, requirements.txt
 transfer_output_files   = results, figs

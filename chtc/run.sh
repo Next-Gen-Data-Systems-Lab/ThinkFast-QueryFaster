@@ -51,14 +51,15 @@ SIZES="${3:-1000,5000,10000}"
 BATCHES="${4:-32,64,128,256}"
 K="${5:-100}"
 TAG="${6:-run}"
+ARMS="${7:-classify,ann,hybrid}"
 
 OUT="results/${DATASET}_${TAG}.jsonl"
-echo "=== dataset=$DATASET model=$MODEL sizes=$SIZES batches=$BATCHES k=$K ==="
+echo "=== dataset=$DATASET model=$MODEL sizes=$SIZES batches=$BATCHES k=$K arms=$ARMS ==="
 
 # Smoke test first: catches a typo in 30 seconds instead of after the model
 # has spent ten minutes loading onto the GPU.
 echo "=== smoke test (mock model, no GPU) ==="
-python3 -m src.runner --dataset synthetic --arms classify,ann,hybrid \
+python3 -m src.runner --dataset synthetic --arms classify,ann,hybrid,agent \
     --model mock --embed-backend tfidf \
     --corpus-sizes 300 --batch-sizes 32 --k 50 \
     --out results/_smoke.jsonl
@@ -67,16 +68,25 @@ echo "=== smoke test passed ==="
 # One process per batch size: deleting a vLLM engine does not reliably release
 # its GPU memory, so a second engine in the same process can run out. Every
 # process appends to the same file.
+#
+# Per-document scores are saved for the last batch size only: batch size does
+# not change the scores, so one copy is enough.
 IFS=, read -ra BATCH_LIST <<< "$BATCHES"
+LAST_BS="${BATCH_LIST[${#BATCH_LIST[@]}-1]}"
 for BS in "${BATCH_LIST[@]}"; do
+    SCORES=""
+    if [[ "$BS" == "$LAST_BS" ]]; then
+        SCORES="results/${DATASET}_${TAG}.scores.jsonl"
+    fi
     python3 -m src.runner \
         --dataset "$DATASET" \
-        --arms classify,ann,hybrid \
+        --arms "$ARMS" \
         --model "$MODEL" \
         --corpus-sizes "$SIZES" \
         --batch-sizes "$BS" \
         --k "$K" \
-        --out "$OUT"
+        --out "$OUT" \
+        --scores-out "$SCORES"
 done
 
 python3 -m src.analyze --results "$OUT" --outdir "figs/${DATASET}_${TAG}"

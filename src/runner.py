@@ -34,6 +34,7 @@ from pathlib import Path
 
 from . import data as D
 from . import metrics as M
+from .arms import agent as AG
 from .arms import ann as ANN
 from .arms import classify as CLS
 
@@ -114,11 +115,16 @@ def main(argv=None):
                    help="vLLM max_num_seqs values; the throughput sweep")
     p.add_argument("--k", type=int, default=100,
                    help="candidates for the ann and hybrid arms")
+    p.add_argument("--agent-k", type=int, default=20,
+                   help="documents the agent sees per search")
+    p.add_argument("--agent-max-steps", type=int, default=8,
+                   help="hard cap on agent search iterations")
     p.add_argument("--threshold", type=float, default=0.5)
     p.add_argument("--max-queries", type=int, default=0,
                    help="0 = all queries in the dataset")
     p.add_argument("--max-chars", type=int, default=2000)
-    p.add_argument("--max-model-len", type=int, default=2048)
+    p.add_argument("--max-model-len", type=int, default=0,
+                   help="0 = 2048, or 4096 when the agent arm runs")
     p.add_argument("--max-num-batched-tokens", type=int, default=0,
                    help=f"vLLM per-step token budget; 0 = batch size x {TOKENS_PER_SEQ}")
     p.add_argument("--gpu-memory-utilization", type=float, default=0.85)
@@ -127,10 +133,14 @@ def main(argv=None):
     p.add_argument("--embed-model",
                    default="sentence-transformers/all-MiniLM-L6-v2")
     p.add_argument("--out", default="results/run.jsonl")
+    p.add_argument("--scores-out", default="",
+                   help="also write per-document scores here, so thresholds can "
+                        "be re-evaluated without another GPU run")
     p.add_argument("--seed", type=int, default=0)
     args = p.parse_args(argv)
 
     arms = [a.strip() for a in args.arms.split(",") if a.strip()]
+    args.max_model_len = args.max_model_len or (4096 if "agent" in arms else 2048)
     sizes = [int(x) for x in args.corpus_sizes.split(",") if x.strip()]
     batches = [int(x) for x in args.batch_sizes.split(",") if x.strip()]
     out = Path(args.out)
@@ -147,8 +157,9 @@ def main(argv=None):
           f"[{D.fingerprint(full)}]", flush=True)
 
     writer = Writer(out)
-    needs_model = {"classify", "hybrid"} & set(arms)
-    needs_index = {"ann", "hybrid"} & set(arms)
+    score_writer = Writer(Path(args.scores_out)) if args.scores_out else None
+    needs_model = {"classify", "hybrid", "agent"} & set(arms)
+    needs_index = {"ann", "hybrid", "agent"} & set(arms)
 
     try:
         for bs in batches:
@@ -190,13 +201,19 @@ def main(argv=None):
                     print(f"[runner] n={len(sub.docs)} index built in {bs_s:.1f}s",
                           flush=True)
 
+                agent = tool = None
+                if "agent" in arms:
+                    agent = AG.SearchAgent(AG.build_chat(model), args.model,
+                                           max_steps=args.agent_max_steps)
+                    tool = AG.RetrievalTool(index, docs_by_id, k=args.agent_k)
+
                 for arm in arms:
                     results = []
                     t_arm = time.perf_counter()
                     for q in qs:
-                        # classify has no k; the key must match what is written
-                        # to the row or resume never skips it.
-                        kk = None if arm == "classify" else args.k
+                        # Only ann and hybrid use k; the key must match what is
+                        # written to the row or resume never skips it.
+                        kk = args.k if arm in ("ann", "hybrid") else None
                         key = (arm, sub.name, len(sub.docs), bs, kk, q.id)
                         if key in seen:
                             continue
@@ -207,9 +224,21 @@ def main(argv=None):
                         elif arm == "hybrid":
                             r = ANN.run_hybrid(index, model, q, docs_by_id,
                                                args.k, args.threshold)
+                        elif arm == "agent":
+                            r = AG.run(agent, tool, q)
                         else:
                             raise ValueError(f"unknown arm {arm!r}")
                         row = {**base, "k": kk, **M.flatten(r, q.gold)}
+                        # Scores first: if the job dies between the two writes,
+                        # resume repeats this query and the reader keeps the
+                        # last score row, rather than the row having no scores.
+                        if score_writer and r.scores:
+                            score_writer.write({
+                                "arm": arm, "query_id": q.id,
+                                "corpus_size": len(sub.docs), "batch_size": bs,
+                                "k": kk, "gold": sorted(q.gold),
+                                "scores": r.scores,
+                            })
                         writer.write(row)
                         seen.add(key)
                         results.append(r)
@@ -233,6 +262,8 @@ def main(argv=None):
                 pass
     finally:
         writer.close()
+        if score_writer:
+            score_writer.close()
 
     print(f"[runner] wrote {out}", flush=True)
     return 0

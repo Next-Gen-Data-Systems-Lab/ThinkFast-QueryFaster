@@ -1,6 +1,4 @@
 results/*.jsonl
-figs/
-logs/
 hf/
 __pycache__/
 *.pyc
@@ -11,13 +9,8 @@ __pycache__/
 .LSOverride
 ._*
 
-# Windows
-Thumbs.db
-desktop.ini
-
 # Editors
 .vscode/
-.idea/
 *.swp
 *~
 

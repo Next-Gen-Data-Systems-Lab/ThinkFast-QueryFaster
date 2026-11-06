@@ -26,9 +26,10 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
 
-ARM_COLOR = {"classify": "#2a78d6", "ann": "#eb6834", "hybrid": "#1baf7a"}
+ARM_COLOR = {"classify": "#2a78d6", "ann": "#eb6834", "hybrid": "#1baf7a",
+             "agent": "#7a4fd0"}
 ARM_LABEL = {"classify": "Classify (full scan)", "ann": "ANN only",
-             "hybrid": "Hybrid (ANN + classify)"}
+             "hybrid": "Hybrid (ANN + classify)", "agent": "Search agent"}
 INK, INK2, GRID = "#0b0b0b", "#52514e", "#dddcd8"
 
 plt.rcParams.update({
@@ -127,7 +128,7 @@ def fig_quality(df: pd.DataFrame, out: Path):
     n = df.corpus_size.max()
     bs = df.batch_size.max()
     d = df[(df.corpus_size == n) & (df.batch_size == bs)]
-    arms = [a for a in ["classify", "ann", "hybrid"] if a in set(d.arm)]
+    arms = [a for a in ["classify", "ann", "hybrid", "agent"] if a in set(d.arm)]
     if not arms:
         return None
     metrics = ["recall", "precision", "f1"]
