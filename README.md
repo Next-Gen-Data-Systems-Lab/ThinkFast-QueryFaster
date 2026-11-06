@@ -2,7 +2,7 @@
 
 Proposal document: https://www.overleaf.com/project/6ac8329001f35b6ac41611bb
 
-**Question.** For a query that asks for *all* matching documents, when is it
+**Question:** For a query that asks for *all* matching documents, when is it
 better to classify every document in parallel than to let an LLM agent search
 iteratively?
 
