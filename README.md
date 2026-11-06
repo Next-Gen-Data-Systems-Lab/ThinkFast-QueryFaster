@@ -9,7 +9,7 @@ iteratively?
 Four execution arms behind one interface:
 
 | Arm | What it does | Cost shape | 
-|---|---|---|---|
+|---|---|---|
 | `agent` | iterative LLM search, reason → search → inspect → repeat | serial in steps |
 | `classify` | one forward pass per (query, document) pair, batched | `O(N)` calls, parallel |
 | `ann` | embed the corpus, retrieve top-k by similarity | `O(log N)`, no model calls |
