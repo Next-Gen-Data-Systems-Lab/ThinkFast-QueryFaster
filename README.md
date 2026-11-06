@@ -2,13 +2,13 @@
 
 Proposal document: https://www.overleaf.com/project/6ac8329001f35b6ac41611bb
 
-**Question.** For a query that asks for *all* matching documents, when is it
+**Question:** For a query that asks for *all* matching documents, when is it
 better to classify every document in parallel than to let an LLM agent search
 iteratively?
 
 Four execution arms behind one interface:
 
-| Arm | What it does | Cost shape |
+| Arm | What it does | Cost shape | 
 |---|---|---|
 | `agent` | iterative LLM search, reason → search → inspect → repeat | serial in steps |
 | `classify` | one forward pass per (query, document) pair, batched | `O(N)` calls, parallel |
