@@ -37,6 +37,13 @@ from . import metrics as M
 from .arms import ann as ANN
 from .arms import classify as CLS
 
+# Every request is prefill only (max_tokens=1), so vLLM's per-step token budget
+# caps the real batch, not max_num_seqs. Its 2048-token default fits about 7 of
+# our ~270-token prompts, which would make the batch-size sweep measure nothing.
+# 512 per slot lets max_num_seqs be the limit. Sizing this from max_model_len
+# instead would ask vLLM to profile a 524K-token step at batch size 256.
+TOKENS_PER_SEQ = 512
+
 
 def gpu_name() -> str:
     try:
@@ -112,6 +119,8 @@ def main(argv=None):
                    help="0 = all queries in the dataset")
     p.add_argument("--max-chars", type=int, default=2000)
     p.add_argument("--max-model-len", type=int, default=2048)
+    p.add_argument("--max-num-batched-tokens", type=int, default=0,
+                   help=f"vLLM per-step token budget; 0 = batch size x {TOKENS_PER_SEQ}")
     p.add_argument("--gpu-memory-utilization", type=float, default=0.85)
     p.add_argument("--embed-backend", default="sentence-transformers",
                    choices=["sentence-transformers", "tfidf"])
@@ -144,11 +153,15 @@ def main(argv=None):
     try:
         for bs in batches:
             model = None
+            budget = args.max_num_batched_tokens or max(
+                bs * TOKENS_PER_SEQ, args.max_model_len)
             if needs_model:
-                print(f"[runner] building decision model (max_num_seqs={bs})", flush=True)
+                print(f"[runner] building decision model (max_num_seqs={bs}, "
+                      f"max_num_batched_tokens={budget})", flush=True)
                 t0 = time.perf_counter()
                 model = CLS.build(
                     args.model, max_num_seqs=bs,
+                    max_num_batched_tokens=budget,
                     max_model_len=args.max_model_len,
                     gpu_memory_utilization=args.gpu_memory_utilization,
                     seed=args.seed,
@@ -165,6 +178,7 @@ def main(argv=None):
                     "dataset": sub.name,
                     "corpus_size": len(sub.docs),
                     "batch_size": bs,
+                    "max_num_batched_tokens": budget,
                     "fingerprint": D.fingerprint(sub),
                 }
 
@@ -180,19 +194,19 @@ def main(argv=None):
                     results = []
                     t_arm = time.perf_counter()
                     for q in qs:
-                        key = (arm, sub.name, len(sub.docs), bs, args.k, q.id)
+                        # classify has no k; the key must match what is written
+                        # to the row or resume never skips it.
+                        kk = None if arm == "classify" else args.k
+                        key = (arm, sub.name, len(sub.docs), bs, kk, q.id)
                         if key in seen:
                             continue
                         if arm == "classify":
                             r = CLS.run(model, q, sub.docs, args.threshold)
-                            kk = None
                         elif arm == "ann":
                             r = ANN.run_ann(index, q, args.k)
-                            kk = args.k
                         elif arm == "hybrid":
                             r = ANN.run_hybrid(index, model, q, docs_by_id,
                                                args.k, args.threshold)
-                            kk = args.k
                         else:
                             raise ValueError(f"unknown arm {arm!r}")
                         row = {**base, "k": kk, **M.flatten(r, q.gold)}

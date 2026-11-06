@@ -38,14 +38,29 @@ after a model has spent ten minutes loading onto a GPU.
 
 ## The midterm run (CHTC)
 
+Copy the project to the access point, then submit from there:
+
 ```bash
-mkdir -p logs
+bash chtc/upload.sh
+
+ssh chtc
+cd ThinkFast-QueryFaster
 condor_submit chtc/midterm.sub
 ```
 
-Two lines in `chtc/midterm.sub` are marked `<--` and should be checked against
-current CHTC docs before the first submit: the container image tag and the GPU
-lab flag.
+`upload.sh` uses the `chtc` SSH alias; set `CHTC_HOST` to use a different host.
+It does not copy `chtc/.env`, because the job does not need a token.
+
+Run a short test job first. It writes to its own output file and compares two
+batch sizes, so it also shows whether the sweep changes throughput:
+
+```bash
+condor_submit SIZES=1000 BATCHES=32,256 TAG=test chtc/midterm.sub
+```
+
+Results come back to `results/` and `figs/` in the project folder on the access
+point. The job only runs on A100 and H200 GPUs; pass `GPU=H200` to pin one type
+so throughput numbers stay comparable between runs.
 
 Equivalent by hand on an interactive GPU session:
 

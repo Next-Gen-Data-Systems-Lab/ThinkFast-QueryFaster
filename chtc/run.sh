@@ -1,19 +1,48 @@
 #!/bin/bash
 # Executable for the CHTC GPU job. Runs inside the container named in the
-# submit file, in the job's scratch directory, with code/ already transferred.
+# submit file, in the job's scratch directory, with src/ already transferred.
 set -euo pipefail
 
 echo "=== host $(hostname)  $(date -Is) ==="
 nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv || true
 python3 -c "import torch;print('torch', torch.__version__, torch.cuda.get_device_name(0))" || true
 
-# Keep model weights and datasets on scratch, not in $HOME (CHTC quota).
-export HF_HOME="${_CONDOR_SCRATCH_DIR:-$PWD}/hf"
+# Keep everything on scratch: the container's filesystem is read-only, and
+# model weights and datasets would not fit in the CHTC home quota.
+SCRATCH="${_CONDOR_SCRATCH_DIR:-$PWD}"
+export HOME="$SCRATCH/home"
+export HF_HOME="$SCRATCH/hf"
 export HF_HUB_ENABLE_HF_TRANSFER=1
 export VLLM_WORKER_MULTIPROC_METHOD=spawn
 export TOKENIZERS_PARALLELISM=false
-export SCIKIT_LEARN_DATA="${_CONDOR_SCRATCH_DIR:-$PWD}/sklearn_data"
-mkdir -p "$HF_HOME" "$SCIKIT_LEARN_DATA" results figs
+export SCIKIT_LEARN_DATA="$SCRATCH/sklearn_data"
+mkdir -p "$HOME" "$HF_HOME" "$SCIKIT_LEARN_DATA" results figs
+
+# HTCondor sets CUDA_VISIBLE_DEVICES to a GPU UUID, but vLLM 0.6.3 parses it as
+# an integer and crashes. Swap the UUID for the matching device index.
+if [[ "${CUDA_VISIBLE_DEVICES:-}" == GPU-* ]]; then
+    GPU_UUID="$CUDA_VISIBLE_DEVICES"
+    GPU_INDEX=$(nvidia-smi --query-gpu=index,uuid --format=csv,noheader \
+        | awk -F', ' -v u="$GPU_UUID" '$2 == u { print $1 }')
+    if [[ -z "$GPU_INDEX" ]]; then
+        echo "ERROR: assigned GPU $GPU_UUID not found by nvidia-smi" >&2
+        exit 1
+    fi
+    export CUDA_DEVICE_ORDER=PCI_BUS_ID
+    export CUDA_VISIBLE_DEVICES="$GPU_INDEX"
+    echo "=== GPU $GPU_UUID is device $GPU_INDEX ==="
+fi
+
+# The vLLM image does not ship everything src/ needs. Install the rest from
+# requirements.txt, leaving out vllm itself; the constraints stop pip changing
+# any package version the image already has.
+if ! python3 -c "import sklearn, pandas, matplotlib, sentence_transformers, datasets" 2>/dev/null; then
+    echo "=== installing missing python packages ==="
+    python3 -m pip list --format=freeze > "$SCRATCH/constraints.txt"
+    grep -v '^vllm' requirements.txt > "$SCRATCH/requirements-job.txt"
+    python3 -m pip install -q --user \
+        -c "$SCRATCH/constraints.txt" -r "$SCRATCH/requirements-job.txt"
+fi
 
 # ---- arguments from the submit file -------------------------------------
 DATASET="${1:-20newsgroups}"
@@ -35,14 +64,20 @@ python3 -m src.runner --dataset synthetic --arms classify,ann,hybrid \
     --out results/_smoke.jsonl
 echo "=== smoke test passed ==="
 
-python3 -m src.runner \
-    --dataset "$DATASET" \
-    --arms classify,ann,hybrid \
-    --model "$MODEL" \
-    --corpus-sizes "$SIZES" \
-    --batch-sizes "$BATCHES" \
-    --k "$K" \
-    --out "$OUT"
+# One process per batch size: deleting a vLLM engine does not reliably release
+# its GPU memory, so a second engine in the same process can run out. Every
+# process appends to the same file.
+IFS=, read -ra BATCH_LIST <<< "$BATCHES"
+for BS in "${BATCH_LIST[@]}"; do
+    python3 -m src.runner \
+        --dataset "$DATASET" \
+        --arms classify,ann,hybrid \
+        --model "$MODEL" \
+        --corpus-sizes "$SIZES" \
+        --batch-sizes "$BS" \
+        --k "$K" \
+        --out "$OUT"
+done
 
 python3 -m src.analyze --results "$OUT" --outdir "figs/${DATASET}_${TAG}"
 

@@ -1,20 +1,51 @@
-# CS 839 -- midterm GPU run on CHTC
+# GPU run on CHTC. Upload with chtc/upload.sh, then from the project folder on
+# the access point:
 #
 #   condor_submit chtc/midterm.sub
 #
-# Check the two marked lines against current CHTC docs before the first
-# submit; GPU lab policy and container paths change.
+# Short test job, with its own output file:
+#
+#   condor_submit SIZES=1000 BATCHES=32,256 TAG=test chtc/midterm.sub
+#
+# Keep comments on their own lines: condor_submit treats a trailing # as part
+# of the value.
+
+if !defined DATASET
+  DATASET = 20newsgroups
+endif
+if !defined MODEL
+  MODEL = Qwen/Qwen2.5-7B-Instruct
+endif
+if !defined SIZES
+  SIZES = 1000,5000,10000
+endif
+if !defined BATCHES
+  BATCHES = 32,64,128,256
+endif
+if !defined K
+  K = 100
+endif
+if !defined TAG
+  TAG = midterm
+endif
+# Regular expression on the device name, e.g. GPU=H200 to keep runs comparable.
+if !defined GPU
+  GPU = A100|H200
+endif
 
 universe                = container
-container_image         = docker://vllm/vllm-openai:v0.6.3     # <-- pin a tag you have tested
+container_image         = docker://vllm/vllm-openai:v0.6.3
+# The image's entrypoint is the vLLM API server. Without this, run.sh is passed
+# to that server as an argument and never runs.
+docker_override_entrypoint = true
 should_transfer_files   = YES
-when_to_transfer_output = ON_EXIT
+# Keeps partial results if the job is evicted, so the runner can resume.
+when_to_transfer_output = ON_EXIT_OR_EVICT
 
 executable              = chtc/run.sh
-# dataset  model  corpus_sizes  batch_sizes  k  tag
-arguments               = 20newsgroups Qwen/Qwen2.5-7B-Instruct 1000,5000,10000 32,64,128,256 100 midterm
+arguments               = $(DATASET) $(MODEL) $(SIZES) $(BATCHES) $(K) $(TAG)
 
-transfer_input_files    = src/, chtc/run.sh, requirements.txt
+transfer_input_files    = src, chtc/run.sh, requirements.txt
 transfer_output_files   = results, figs
 
 log                     = logs/$(Cluster)_$(Process).log
@@ -30,11 +61,19 @@ request_gpus            = 1
 # A100 (40/80GB) or H200. A 7B model in bf16 needs ~15GB of weights; the rest
 # is KV cache, which is what lets max_num_seqs go high -- and batch size is
 # the variable this project is about, so ask for the big card.
-require_gpus            = (GlobalMemoryMb >= 40000)
-+WantGPULab             = true                                  # <-- confirm current CHTC flag
-+GPUJobLength           = "long"
+#
+# Capability bounds: bf16 needs 8.0+, and vLLM 0.6.3 predates anything past
+# 9.0. MIG slices are excluded because they are only part of a GPU. The image
+# is built on CUDA 12.1.
+requirements = (Target.CUDADriverVersion >= 12.1) && \
+               (Target.GPUs_GlobalMemoryMb >= 40000) && \
+               (Target.GPUs_Capability >= 8.0) && (Target.GPUs_Capability <= 9.0) && \
+               !regexp("MIG", Target.GPUs_DeviceName) && \
+               regexp("$(GPU)", Target.GPUs_DeviceName)
 
-# Long enough for four engine builds plus the sweep.
-+MaxWallTimeMinutes     = 480
++WantGPULab             = true
++WantFlocking           = false
++WantGlidein            = false
++GPUJobLength           = "long"
 
 queue 1

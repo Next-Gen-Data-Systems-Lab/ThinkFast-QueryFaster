@@ -64,6 +64,7 @@ class DecisionModel:
         self,
         model: str = "Qwen/Qwen2.5-7B-Instruct",
         max_num_seqs: int = 256,
+        max_num_batched_tokens: int | None = None,
         max_model_len: int = 2048,
         gpu_memory_utilization: float = 0.85,
         dtype: str = "auto",
@@ -77,6 +78,7 @@ class DecisionModel:
         self.llm = LLM(
             model=model,
             max_num_seqs=max_num_seqs,
+            max_num_batched_tokens=max_num_batched_tokens,
             max_model_len=max_model_len,
             gpu_memory_utilization=gpu_memory_utilization,
             dtype=dtype,
