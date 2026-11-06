@@ -1,7 +1,3 @@
-results/*.npz
-results/*.json
-results/*.jsonl
-hf/
 __pycache__/
 *.pyc
 

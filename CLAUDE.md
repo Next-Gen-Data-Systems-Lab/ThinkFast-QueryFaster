@@ -3,10 +3,8 @@
 CS 839 project: for a query that asks for *all* matching documents, when is it
 better to classify every document in parallel than to let an LLM agent search?
 
-- **People:** Ayesha, Nabanita and Nida present together. Nabanita does most of
-  the work, so nothing should wait on the others.
-- **Dates:** midterm presentation (8 minutes) around Nov 10, 2026. Final report
-  due Dec 7, 2026.
+- **Dates:** midterm presentation (8 minutes) on Nov 10, 2026. Final report
+  due Dec 9, 2026.
 - **Source of truth:** the plan (`Plan - Open-Source Jev Alternative vs. Agentic
   Search.md`) over the older proposal. Update rate is future work.
 
@@ -29,8 +27,7 @@ Keep this file and `README.md` updated with progress as work happens.
 
 ## Running on CHTC
 
-`ssh chtc` needs an interactive login, and port 22 may need the campus network
-or VPN. Claude reuses that connection, so it has to be open.
+`ssh chtc` needs an interactive login, and port 22 may need the VPN. Claude reuses that connection, so it has to be open.
 
 ```bash
 bash chtc/upload.sh                 # copies to ~/ThinkFast-QueryFaster on ap2001
@@ -78,5 +75,4 @@ AGENT_STEPS AGENT_CONCURRENCY MAX_CHARS GPU LENGTH`.
 
 Results and status are in the Status section of `README.md`. The midterm deck is
 https://claude.ai/artifact/E1R5FHuvJHniGchsHttgeE (10 slides plus a backup, with
-timed speaker notes). The original Google Slides deck can't be edited from here
-because no Slides editor connector is available.
+timed speaker notes).

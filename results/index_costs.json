@@ -1,0 +1,55 @@
+{
+ "corpus_size": 10000,
+ "dim": 384,
+ "embed_s": 28.302671458,
+ "graph_build_s": 0.8476321250000005,
+ "graph_build_docs": 9000,
+ "insert_s": 0.11108562500000119,
+ "insert_docs": 1000,
+ "insert_ms_per_doc": 0.11108562500000119,
+ "exact_ms_per_query": 0.01629270749999634,
+ "search": [
+  {
+   "ef": 100,
+   "k": 100,
+   "recall_vs_exact": 0.9869999999999999,
+   "ms_per_query": 0.07035834999999935
+  },
+  {
+   "ef": 400,
+   "k": 100,
+   "recall_vs_exact": 1.0,
+   "ms_per_query": 0.13630209999995202
+  },
+  {
+   "ef": 1600,
+   "k": 100,
+   "recall_vs_exact": 1.0,
+   "ms_per_query": 0.35481669999999355
+  },
+  {
+   "ef": 1600,
+   "k": 1000,
+   "recall_vs_exact": 0.9996499999999999,
+   "ms_per_query": 0.3566208000000515
+  },
+  {
+   "ef": 4000,
+   "k": 100,
+   "recall_vs_exact": 1.0,
+   "ms_per_query": 0.5912478999999138
+  },
+  {
+   "ef": 4000,
+   "k": 1000,
+   "recall_vs_exact": 1.0,
+   "ms_per_query": 0.5896333000000809
+  },
+  {
+   "ef": 4000,
+   "k": 3000,
+   "recall_vs_exact": 0.9998333333333334,
+   "ms_per_query": 0.6434604000000732
+  }
+ ]
+}
