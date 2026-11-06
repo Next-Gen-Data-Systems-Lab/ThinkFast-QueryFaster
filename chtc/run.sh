@@ -52,6 +52,8 @@ BATCHES="${4:-32,64,128,256}"
 K="${5:-100}"
 TAG="${6:-run}"
 ARMS="${7:-classify,ann,hybrid}"
+MAX_QUERIES="${8:-0}"
+AGENT_STEPS="${9:-8}"
 
 OUT="results/${DATASET}_${TAG}.jsonl"
 echo "=== dataset=$DATASET model=$MODEL sizes=$SIZES batches=$BATCHES k=$K arms=$ARMS ==="
@@ -85,6 +87,8 @@ for BS in "${BATCH_LIST[@]}"; do
         --corpus-sizes "$SIZES" \
         --batch-sizes "$BS" \
         --k "$K" \
+        --max-queries "$MAX_QUERIES" \
+        --agent-max-steps "$AGENT_STEPS" \
         --out "$OUT" \
         --scores-out "$SCORES"
 done

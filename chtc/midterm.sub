@@ -35,6 +35,17 @@ endif
 if !defined ARMS
   ARMS = classify,ann,hybrid
 endif
+# 0 runs every query in the dataset.
+if !defined MAX_QUERIES
+  MAX_QUERIES = 0
+endif
+# CHTC limits: short = 12 hours, medium = 24 hours, long = 7 days and 4 GPUs.
+if !defined LENGTH
+  LENGTH = long
+endif
+if !defined AGENT_STEPS
+  AGENT_STEPS = 8
+endif
 # Regular expression on the device name, e.g. GPU=H200 to keep runs comparable.
 if !defined GPU
   GPU = A100|H200
@@ -50,7 +61,7 @@ should_transfer_files   = YES
 when_to_transfer_output = ON_EXIT_OR_EVICT
 
 executable              = chtc/run.sh
-arguments               = $(DATASET) $(MODEL) $(SIZES) $(BATCHES) $(K) $(TAG) $(ARMS)
+arguments               = $(DATASET) $(MODEL) $(SIZES) $(BATCHES) $(K) $(TAG) $(ARMS) $(MAX_QUERIES) $(AGENT_STEPS)
 
 transfer_input_files    = src, chtc/run.sh, requirements.txt
 transfer_output_files   = results, figs
@@ -81,6 +92,6 @@ requirements = (Target.CUDADriverVersion >= 12.1) && \
 +WantGPULab             = true
 +WantFlocking           = false
 +WantGlidein            = false
-+GPUJobLength           = "long"
++GPUJobLength           = "$(LENGTH)"
 
 queue 1

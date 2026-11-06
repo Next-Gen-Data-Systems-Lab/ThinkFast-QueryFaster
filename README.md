@@ -15,6 +15,34 @@ Four execution arms behind one interface:
 | `ann` | embed the corpus, retrieve top-k by similarity | `O(log N)`, no model calls |
 | `hybrid` | ANN for candidates, then classify those k | `O(k)` calls |
 
+## Status
+
+*Last updated Nov 6, 2026. Measured on one H200 with Qwen2.5-7B.*
+
+All four arms run on CHTC, including a measured search agent. Results are in
+`results/`, and `python -m src.summarize_runs results` prints the numbers.
+
+| N | Scan recall | Scan s/query | Agent recall | Agent s/query |
+|---:|---:|---:|---:|---:|
+| 1,000 | 0.29 | 5.8 | 0.23 | 2.1 |
+| 5,000 | 0.31 | 29 | 0.14 | 4.6 |
+| 10,000 | 0.31 | 60 | 0.09 | 5.0 |
+
+Scan is at batch size 32 and threshold 0.5. The agent is allowed 64 steps.
+Precision is similar for both, 0.68-0.76.
+
+- **Throughput:** levels off at batch size 32, about 170 documents per second.
+- **Agent stopping:** extra budget doesn't help. At N = 10,000 it stops by choice
+  after about 10 steps, with 44 of 500 relevant documents found.
+- **Exchange rate:** one agent step costs about 70 scan decisions (0.41 s at 170
+  documents per second), or 80-90 on Qwen 1.5B.
+- **Limits:** the scan's lead mostly disappears on NFCorpus, where hybrid has the
+  best F1. Qwen 1.5B scans about 2.4x faster but ranks much worse. Agent calls
+  were not batched across queries.
+
+**Next:** rehearse the midterm talk, then build adaptive k for the final report
+(due Dec 7).
+
 ---
 
 ## Quick start
@@ -63,6 +91,17 @@ one batch size:
 
 ```bash
 condor_submit ARMS=agent BATCHES=32 TAG=agent chtc/midterm.sub
+```
+
+For the full sweep, submit one job per batch size so they run in parallel on
+identical GPUs. Each one needs its own `TAG`, or their results overwrite each
+other. `H200$` leaves out the H200 NVL.
+
+```bash
+for bs in 1 4 8 16 32 64 256; do
+  condor_submit BATCHES=$bs TAG=sweep_bs$bs GPU='H200$' LENGTH=short chtc/midterm.sub
+done
+condor_submit ARMS=agent BATCHES=32 TAG=agent GPU='H200$' LENGTH=short chtc/midterm.sub
 ```
 
 HTCondor reads `src/` when a job starts, not when it is submitted, so uploading
@@ -169,6 +208,7 @@ src/
   metrics.py       ArmResult, set metrics, nDCG, threshold sweep
   runner.py        experiment driver (resumable, JSONL)
   analyze.py       figures + markdown tables for the report
+  summarize_runs.py  numbers across all runs, as used in the midterm deck
   arms/
     classify.py    Approach B  (+ MockDecisionModel for offline tests)
     ann.py         Approaches C and D
@@ -215,8 +255,10 @@ the evidence for H1, which is the strongest claim in the project.
 
 - [x] Confirm the container tag and GPU flag in `chtc/midterm.sub`
 - [x] Agent arm — the arm H1 and H2 are measured against
-- [ ] Simple keyword and multi-condition queries; all current queries are
+- [x] Second dataset (NFCorpus) and second model (Qwen2.5-1.5B)
+- [ ] Simple keyword and multi-condition queries; all 20 Newsgroups queries are
       semantic category queries
+- [ ] Batch agent calls across queries, which would lower the exchange rate
 - [ ] Document-length sweep
 - [ ] Calibrate the classifier threshold from the saved scores
 - [ ] Sweep `k` for the hybrid arm; the ceiling finding says `k` should scale
