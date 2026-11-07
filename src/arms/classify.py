@@ -84,6 +84,9 @@ class DecisionModel:
             dtype=dtype,
             seed=seed,
             enable_prefix_caching=True,
+            # vLLM refuses prefix caching if a model declares a sliding window,
+            # as Phi-3.5 does. Our context is far shorter than any such window.
+            disable_sliding_window=True,
             disable_log_stats=True,
         )
         self.load_s = time.perf_counter() - t0

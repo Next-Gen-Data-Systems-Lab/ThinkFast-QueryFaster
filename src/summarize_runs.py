@@ -151,7 +151,7 @@ def main(results: str) -> None:
         print(f"seconds per call {seconds_per_call(small[small.arm == 'agent']):.3f}")
     print_batched_agent(results)
     print_doc_lengths(results)
-    print_file(root / "20newsgroups_logic.jsonl", "Keyword and multi-condition queries",
+    print_file(root / "20newsgroups_logic_logic.jsonl", "Keyword and multi-condition queries",
                quality, ["corpus_size", "arm"])
     phi = print_file(root / "20newsgroups_phi.jsonl", "Phi-3.5-mini", quality,
                      ["corpus_size", "arm"])

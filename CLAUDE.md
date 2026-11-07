@@ -23,7 +23,8 @@ Keep this file and `README.md` updated with progress as work happens.
 - Position adaptive k as cost-based access-path selection, and check the ranked
   list truncation literature first. Done: the test came back negative, so report
   it as a negative result with the oracle bound. The strongest finding is the
-  scan in embedding order beating the agent at equal time.
+  scan in embedding order beating the agent at equal time, one query at a time.
+  Batched agents only tie it, at the agent's low recall.
 
 ## Running on CHTC
 
@@ -37,7 +38,7 @@ condor_submit BATCHES=32 TAG=name GPU='H200$' LENGTH=short chtc/midterm.sub
 ```
 
 Submit-time options: `DATASET MODEL SIZES BATCHES K TAG ARMS MAX_QUERIES
-AGENT_STEPS AGENT_CONCURRENCY MAX_CHARS GPU LENGTH`.
+AGENT_STEPS AGENT_CONCURRENCY AGENT_REPLICAS MAX_CHARS GPU LENGTH`.
 
 ## Things that have broken before
 
@@ -53,6 +54,10 @@ AGENT_STEPS AGENT_CONCURRENCY MAX_CHARS GPU LENGTH`.
 - **`TAG`:** parallel jobs need different tags or their results overwrite.
 - **GPUs:** `H200$` leaves out the H200 NVL. Blackwell GPUs are too new for vLLM
   0.6.3, and `midterm.sub` keeps to compute capability 8.0-9.0.
+- **SSH watchers:** a dropped connection also empties `condor_q` output. Check the
+  ssh exit code, or a dead connection looks like finished jobs.
+- **Sliding window:** vLLM refuses prefix caching for models that declare one, such
+  as Phi-3.5. `classify.py` passes `disable_sliding_window=True`.
 - **Token budget:** `max_num_batched_tokens` defaults to 2048, which limits
   prefill-only work. The runner sets batch size x 512. Don't size it from
   `max_model_len`: at batch size 256 that means profiling a 524K-token step.

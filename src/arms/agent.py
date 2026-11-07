@@ -221,10 +221,12 @@ class SearchAgent:
         except StopIteration as done:
             return done.value
 
-    def _steps(self, query_text: str, tool: RetrievalTool):
+    def _steps(self, query_text: str, tool: RetrievalTool, session: str = ""):
         """Generator: yields messages, receives a ChatReply, returns the answer.
 
         Keeping the loop free of model calls lets `find` and `run_many` share it.
+        `session` marks a replica of a query, so its prompts differ from the
+        original's and prefix caching cannot make the repeat look cheap.
 
         Returns (matching document ids, stats).
 
@@ -239,6 +241,7 @@ class SearchAgent:
                                    agent judges its last results
             parse_failures  int    replies that were not usable JSON
         """
+        system = SYSTEM_PROMPT + (f"\n\nSession {session}." if session else "")
         kept: set[str] = set()
         seen: set[str] = set()
         searches: list[str] = []
@@ -249,7 +252,7 @@ class SearchAgent:
 
         while True:
             reply = yield [
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": system},
                 {"role": "user", "content": render_turn(
                     query_text, len(kept), searches, results)}]
             stats["llm_calls"] += 1
@@ -341,7 +344,7 @@ def run_many(agent: SearchAgent, new_tool, queries: list,
     def admit():
         while waiting and len(active) < concurrency:
             query, tool = waiting.popleft(), new_tool()
-            steps = agent._steps(query.text, tool)
+            steps = agent._steps(query.text, tool, query.id.partition("#")[2])
             active.append({"query": query, "tool": tool, "steps": steps,
                            "messages": next(steps),
                            "start": time.perf_counter()})

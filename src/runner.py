@@ -123,6 +123,9 @@ def main(argv=None):
     p.add_argument("--agent-concurrency", default="",
                    help="queries in flight, as a sweep such as 1,4,16; empty "
                         "runs them strictly one at a time")
+    p.add_argument("--agent-replicas", type=int, default=1,
+                   help="run each query this many times, to reach concurrency "
+                        "beyond the number of queries")
     p.add_argument("--threshold", type=float, default=0.5)
     p.add_argument("--max-queries", type=int, default=0,
                    help="0 = all queries in the dataset")
@@ -220,8 +223,12 @@ def main(argv=None):
                 for arm in arms:
                     if arm == "agent" and concurrency:
                         for c in concurrency:
-                            todo = [q for q in qs if ("agent", sub.name, len(sub.docs),
-                                                      bs, None, q.id, c) not in seen]
+                            copies = qs if args.agent_replicas == 1 else [
+                                D.Query(f"{q.id}#{r}", q.text, q.gold)
+                                for r in range(args.agent_replicas) for q in qs]
+                            golds.update({q.id: q.gold for q in copies})
+                            todo = [q for q in copies if ("agent", sub.name, len(sub.docs),
+                                                          bs, None, q.id, c) not in seen]
                             if not todo:
                                 continue
                             rs, batch = AG.run_many(

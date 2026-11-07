@@ -58,6 +58,7 @@ AGENT_STEPS="${9:-8}"
 AGENT_CONCURRENCY="${10:-none}"
 [[ "$AGENT_CONCURRENCY" == none ]] && AGENT_CONCURRENCY=""
 MAX_CHARS="${11:-2000}"
+AGENT_REPLICAS="${12:-1}"
 
 OUT="results/${DATASET}_${TAG}.jsonl"
 echo "=== dataset=$DATASET model=$MODEL sizes=$SIZES batches=$BATCHES k=$K arms=$ARMS ==="
@@ -95,6 +96,7 @@ for BS in "${BATCH_LIST[@]}"; do
         --agent-max-steps "$AGENT_STEPS" \
         --agent-concurrency "$AGENT_CONCURRENCY" \
         --max-chars "$MAX_CHARS" \
+        --agent-replicas "$AGENT_REPLICAS" \
         --out "$OUT" \
         --scores-out "$SCORES"
 done

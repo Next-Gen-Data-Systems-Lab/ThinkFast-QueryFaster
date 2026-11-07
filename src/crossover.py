@@ -28,8 +28,10 @@ SCORES = "results/20newsgroups_sweep_bs32.scores.jsonl"
 AGENT = "results/20newsgroups_agent_s64.jsonl"
 BATCHED = "results/20newsgroups_agentbatch.jsonl"
 BATCHED_NF = "results/nfcorpus_agentbatch.jsonl"
+REPLICATED = "results/20newsgroups_agentrep.jsonl"
 SIZES = (1000, 5000, 10000)
-RATE = 170.0     # documents per second at the batch-size plateau, N = 5,000-10,000
+RATE = 170.0     # 20 Newsgroups documents per second at the batch-size plateau
+RATE_NF = 95.0   # NFCorpus documents are longer
 
 
 def rows(path: str) -> pd.DataFrame:
@@ -73,7 +75,7 @@ def equal_time(thresholds: dict[int, float]) -> list[dict]:
     return out
 
 
-def exchange_rates(path: str) -> list[dict]:
+def exchange_rates(path: str, rate: float = RATE) -> list[dict]:
     if not Path(path).exists():
         return []
     r = rows(path)
@@ -81,9 +83,28 @@ def exchange_rates(path: str) -> list[dict]:
     for (n, c), g in r.groupby(["corpus_size", "agent_concurrency"]):
         tau = g.batch_wall_s.iloc[0] / g.n_llm_calls.sum()
         out.append({"n": int(n), "concurrency": int(c), "tau": float(tau),
-                    "exchange": float(tau * RATE), "recall": float(g.recall.mean()),
+                    "exchange": float(tau * rate), "recall": float(g.recall.mean()),
+                    "calls": float(g.n_llm_calls.mean()),
                     "in_flight": float(g.batch_mean_in_flight.iloc[0]),
                     "latency_s": float(g.wall_s.mean())})
+    return out
+
+
+def nfcorpus_equal_gpu(t: float = 0.5) -> list[dict]:
+    """The same comparison on NFCorpus, on the 50 queries that have scan scores."""
+    queries = AP.load("nfcorpus", 3633, "results/nfcorpus_nf.scores.jsonl")
+    ids = [q.id for q in queries]
+    out = []
+    for c, g in rows(BATCHED_NF).groupby("agent_concurrency"):
+        tau = g.batch_wall_s.iloc[0] / g.n_llm_calls.sum()
+        a = g.set_index("query_id").loc[ids]
+        k = int(round(a.n_llm_calls.mean() * tau * RATE_NF))
+        plan = AP.rows_for(queries, [k] * len(queries), t)
+        out.append({"concurrency": int(c), "k": k, "exchange": float(tau * RATE_NF),
+                    "scan_recall": float(plan["recall"].mean()), "scan_f1": float(plan["f1"].mean()),
+                    "agent_recall": float(a.recall.mean()), "agent_f1": float(a.f1.mean()),
+                    "paired_f1": AP.paired(plan["f1"], a.f1.values),
+                    "paired_recall": AP.paired(plan["recall"], a.recall.values)})
     return out
 
 
@@ -97,16 +118,35 @@ def main(argv=None):
     report = json.loads(Path(args.paths).read_text())
     thresholds = {n: report[f"20newsgroups_{n}"]["calibration"]["median_t"] for n in SIZES}
     out = {"rate": RATE, "equal_time": equal_time(thresholds),
-           "exchange": exchange_rates(BATCHED), "exchange_nf": exchange_rates(BATCHED_NF)}
+           "exchange": exchange_rates(BATCHED) + exchange_rates(REPLICATED),
+           "exchange_nf": exchange_rates(BATCHED_NF, RATE_NF)}
+    queries = {n: AP.load("20newsgroups", n, SCORES) for n in SIZES}
+    for r in out["exchange"]:
+        # The scan's recall for the same GPU seconds as this agent configuration.
+        k = int(round(r["calls"] * r["exchange"]))
+        for name, t in (("half", 0.5), ("cal", thresholds[r["n"]])):
+            qs = queries[r["n"]]
+            r[f"scan_{name}"] = float(AP.rows_for(qs, [min(k, q.n) for q in qs], t)["recall"].mean())
+        r["k"] = k
+    out["nfcorpus_equal_gpu"] = nfcorpus_equal_gpu()
     Path(args.out).write_text(json.dumps(out, indent=1, default=float))
     for r in out["equal_time"]:
         print(f"N={r['n']}: agent R {r['agent_recall']:.3f} in {r['agent_s']:.1f}s | scan to k={r['k']}: "
               f"R {r['half_recall']:.3f} ({r['half_d']:+.3f} [{r['half_lo']:+.3f},{r['half_hi']:+.3f}], "
               f"{r['half_wins']}/20) | break-even {r['half_breakeven']:.1f}, calibrated {r['cal_breakeven']:.1f}")
+    for r in out["nfcorpus_equal_gpu"]:
+        d, lo, hi = r["paired_recall"]
+        f, flo, fhi = r["paired_f1"]
+        print(f"nfcorpus c={r['concurrency']}: E={r['exchange']:.1f} k={r['k']} scan R {r['scan_recall']:.3f} "
+              f"F1 {r['scan_f1']:.3f} | agent R {r['agent_recall']:.3f} F1 {r['agent_f1']:.3f} | "
+              f"dR {d:+.3f} [{lo:+.3f},{hi:+.3f}] dF1 {f:+.3f} [{flo:+.3f},{fhi:+.3f}]")
     for key in ("exchange", "exchange_nf"):
         for r in out[key]:
             print(f"{key} N={r['n']} c={r['concurrency']}: {r['tau']:.3f} s/call, "
-                  f"E={r['exchange']:.1f}, R {r['recall']:.3f}, in flight {r['in_flight']:.1f}")
+                  f"E={r['exchange']:.1f}, R {r['recall']:.3f}, in flight {r['in_flight']:.1f}, "
+                  f"latency {r['latency_s']:.1f}s"
+                  + (f", scan k={r['k']} R {r['scan_half']:.3f} (t=.5) {r['scan_cal']:.3f} (cal)"
+                     if "k" in r else ""))
 
 
 if __name__ == "__main__":

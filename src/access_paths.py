@@ -48,6 +48,8 @@ RUNS = [
     ("20newsgroups", 5000, "results/20newsgroups_sweep_bs32.scores.jsonl"),
     ("20newsgroups", 10000, "results/20newsgroups_sweep_bs32.scores.jsonl"),
     ("nfcorpus", 3633, "results/nfcorpus_nf.scores.jsonl"),
+    ("20newsgroups_logic", 1000, "results/20newsgroups_logic_logic.scores.jsonl"),
+    ("20newsgroups_logic", 10000, "results/20newsgroups_logic_logic.scores.jsonl"),
 ]
 
 

@@ -34,11 +34,10 @@ Precision is similar for both, 0.68-0.76.
 - **Throughput:** levels off at batch size 32, about 170 documents per second.
 - **Agent stopping:** extra budget doesn't help. At N = 10,000 it stops by choice
   after about 10 steps, with 44 of 500 relevant documents found.
-- **Exchange rate:** one agent step costs about 70 scan decisions (0.41 s at 170
-  documents per second), or 80-90 on Qwen 1.5B.
+- **Exchange rate:** one agent step costs about 78 scan decisions (0.46 s of wall
+  time at 170 documents per second), falling to about 11 when calls are batched.
 - **Limits:** the scan's lead mostly disappears on NFCorpus, where hybrid has the
-  best F1. Qwen 1.5B scans about 2.4x faster but ranks much worse. Agent calls
-  were not batched across queries.
+  best F1. Qwen 1.5B scans about 2.4x faster but ranks much worse.
 
 **Next:** rehearse the midterm talk (around Nov 10), then work through the plan
 under [Next steps](#next-steps) for the final report (due Dec 7).
@@ -83,8 +82,61 @@ it. All numbers are 20 Newsgroups with Qwen2.5-7B unless stated.
   against 0.73. N = 5K gives +0.142. At N = 1K the gap is not significant (+0.048,
   CI -0.003 to 0.099).
 - **Break-even exchange rate:** the agent would match the ordered scan only if a
-  call cost about 11 decisions at N = 10K (6 with the calibrated threshold), not 70.
-  Agent calls were not batched in this number.
+  call cost about 11 decisions at N = 10K (6 with the calibrated threshold).
+- **Batching lowers the exchange rate to break-even, and no further.** Recall does
+  not change. At N = 10K, on one H200, with each query run 16 times to reach high
+  concurrency (session tags stop prefix caching from helping):
+
+  | Mean in flight | s per call | Decisions per call | Scan R, same GPU time | Agent R | Latency |
+  |---:|---:|---:|---:|---:|---:|
+  | 1 | 0.46 | 78 | 0.25 | 0.08 | 4.5 s |
+  | 9 | 0.09 | 15 | 0.10 | 0.09 | 9.5 s |
+  | 22 | 0.084 | 14 | 0.12 | 0.09 | 29 s |
+  | 53 | 0.063 | 11 | 0.09 | 0.09 | 106 s |
+
+  So at t = 0.5 a fully batched agent ties the scan (+0.003, 95% CI -0.019 to 0.026),
+  at recall 0.09, and with about 100 s of latency. With t = 1e-8 the scan keeps its
+  lead (+0.060, CI 0.038 to 0.083, better on 17 of 20). Batching makes the agent
+  cheaper, not more complete: recall stays at 0.09 whatever the concurrency.
+- **The crossover:** one at a time, the scan wins at equal GPU time. Agents reach
+  parity only with dozens of queries in flight, and only up to the agent's own
+  recall. Above that, the scan is the only arm that gets there.
+- **NFCorpus crosses, narrowly.** At its own 95 documents per second, a call falls
+  from 33 decisions to 3.7. On the 50 queries with scan scores, the agent passes the
+  scan on recall only at 84 in flight (0.15 against 0.11, CI -0.095 to -0.010), and
+  not on F1. That is one run, and the agent's recall there was 0.12-0.13 in the
+  other four runs, so treat it as a sign of noise as much as of a crossover.
+- **The exchange rate is the same order across models, not the same number:** 78
+  for Qwen 7B, 80-90 for Qwen 1.5B, 122 for Phi-3.5-mini (210 documents per second,
+  0.57 s per call, 100 generated tokens). But the 1.5B and Phi agents stop after 1
+  to 1.5 searches, so those two rates come from almost trivial runs. Only the 7B
+  agent really searches, so the agent comparison rests on one model. Phi's scan
+  ranks well (recall@100 of 0.55 at N = 1K, against 0.75 for 7B and 0.37 for 1.5B).
+- **Adaptive k also fails where answer sizes vary.** The keyword and multi-condition
+  queries span 18 to 1,046 answers at N = 10K, and the oracle has up to 0.07 more
+  recall than fixed k. Score mass and yield still tie fixed k, and sampling loses.
+- **Query shape decides the scan's quality.** At N = 10K and t = 0.5, with the same
+  arms on 25 queries:
+
+  | Shape (queries) | Scan R / P | Agent R / P |
+  |---|---:|---:|
+  | Keyword (10) | 0.82 / 0.69 | 0.26 / 0.67 |
+  | AND (6) | 0.72 / 0.59 | 0.24 / 0.62 |
+  | OR (5) | 0.32 / 0.88 | 0.06 / 0.88 |
+  | NOT (4) | 0.10 / 0.74 | 0.06 / 0.63 |
+
+  The best threshold follows the shape. Narrow, exact queries (keyword, AND) peak
+  near 0.5, while broad topic queries (OR, NOT, categories) want about 1e-8, where
+  NOT reaches recall 0.51. So one global cutoff is wrong, and the NOT failure looks
+  like the broad-topic problem rather than a failure of negation, though four
+  queries is too few to be sure. Keyword gold sets come from exact word matches, so
+  a plain text search scores 1.0 on them by construction. They measure how reliable
+  the model is, and are not a case for using one.
+- **Cost follows tokens.** Cutting documents to 250, 500, 1,000, 2,000 and 4,000
+  characters gives 369, 276, 212, 174 and 149 documents per second, at 44-53K tokens
+  per second throughout. Recall is 0.21, 0.25, 0.27, 0.29 and 0.29, so 1,000
+  characters is 22% faster than 2,000 for 0.02 recall. The exchange rate scales the
+  same way, because it is a rate per document.
 - **Index cost:** on a laptop, the HNSW graph for 10K documents builds in under a
   second and inserts take 0.11 ms per document. Search keeps at least 99.9% of the
   exact top k up to k = 3,000 when `ef` is at least k. Embedding is the real cost
@@ -265,6 +317,7 @@ src/
   embed_ranks.py   saves all query-document similarities, for offline replay
   access_paths.py  fixed k, adaptive k, oracle, threshold calibration, transfer
   crossover.py     performance model, equal-time comparison, exchange rates
+  report_figs.py   final report figures
   index_costs.py   HNSW build, insert and deep-k recall (needs hnswlib)
   arms/
     classify.py    Approach B  (+ MockDecisionModel for offline tests)
@@ -322,24 +375,17 @@ Done so far:
 - [x] Calibrate the classifier threshold on held-out queries
 - [x] Clean up `src/summarize_runs.py`
 - [x] Swap exact search for HNSW and report index build and insert cost
+- [x] Batch agent calls across queries (`agentbatch`)
+- [x] Repeat the adaptive k test on keyword and multi-condition queries
+- [x] Document-length sweep
+- [x] Fit the performance model and measure the crossover (`agentrep`)
+- [x] Second decision model family (Phi-3.5-mini)
 
 ### Before the final report (Dec 7)
 
 The two contributions are adaptive k and the exchange rate.
 
-- [ ] Batch agent calls across queries, which would lower the exchange rate
-      (`agentbatch` jobs queued on CHTC)
-- [ ] Fit the performance model and plot the crossover between scan and agent
-      (`src/crossover.py` is ready for the batched numbers)
-- [ ] Repeat the adaptive k test on the logic queries, where answer sizes vary
 - [ ] Write the final report
-
-### If time allows
-
-- [ ] Keyword and multi-condition queries (`20newsgroups_logic`, job queued)
-- [ ] Document-length sweep (`len*` jobs queued)
-- [ ] Second decision model to show the finding is architectural (Phi-3.5-mini,
-      job queued)
 
 ### Future work
 
