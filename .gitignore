@@ -15,3 +15,6 @@ __pycache__/
 # Secrets
 .env
 .env.*
+
+# Built data (rebuild with python -m src.synergy_build)
+data/

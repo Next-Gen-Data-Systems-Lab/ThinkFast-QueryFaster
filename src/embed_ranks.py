@@ -26,7 +26,8 @@ def path_for(results: Path, dataset: str, n: int) -> Path:
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--dataset", default="20newsgroups", choices=sorted(D.LOADERS))
+    p.add_argument("--dataset", default="20newsgroups",
+                   help="comma-separated; 'synergy' means all 26 reviews")
     p.add_argument("--corpus-sizes", default="1000,5000,10000")
     p.add_argument("--embed-model", default="sentence-transformers/all-MiniLM-L6-v2")
     p.add_argument("--max-chars", type=int, default=2000)
@@ -34,9 +35,7 @@ def main(argv=None):
     p.add_argument("--results", default="results")
     args = p.parse_args(argv)
 
-    full = D.load(args.dataset, max_chars=args.max_chars)
-    for n in [int(x) for x in args.corpus_sizes.split(",") if x.strip()]:
-        sub = full.subsample(n, seed=args.seed)
+    for sub in D.subsets(args.dataset, args.corpus_sizes, args.max_chars, args.seed):
         index = ANN.Index(model=args.embed_model)
         seconds = index.build(sub.docs)
         queries = index._embed([q.text for q in sub.queries], is_query=True)

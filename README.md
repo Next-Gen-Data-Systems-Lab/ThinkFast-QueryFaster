@@ -215,9 +215,10 @@ bootstrap 95% interval over queries.
 
 Related work to cite: ranked list truncation (Choppy, AttnCut, and Meng et al.
 2024 for LLM re-ranking), adaptive-k for RAG (Taguchi et al. 2025), stopping rules
-for technology-assisted review (Cormack and Grossman), and semantic filter
-cascades (LOTUS; Kim et al. 2026). Sources are at the end of
-[Next steps](#next-steps). Only abstracts have been read so far.
+for technology-assisted review (Cormack and Grossman 2016; Yang et al. 2021), and
+semantic filter cascades (LOTUS; Kim et al. 2026). Sources are at the end of
+[Next steps](#next-steps). Meng et al. and LOTUS were read in full; the others
+from their abstracts.
 
 ---
 
@@ -314,7 +315,21 @@ it stopped.
 |---|---:|---:|---:|---|
 | `20newsgroups` | ~18.8K | 20 | hundreds | Every doc carries a category label, so "find all documents about cryptography" has an **exact** answer set. Ships with scikit-learn. **Primary.** |
 | `nfcorpus` | ~3.6K | ~320 | ~38 | Real IR relevance judgments. Needs `datasets`. Second dataset, for generality. |
+| `20newsgroups_logic` | ~18.8K | 25 | 18-1,046 | Keyword, AND, OR and NOT queries on the same documents; gold from labels and exact word matches. |
+| `synergy_<review>` | 257-48K | 1 each | 9-762 | **Main benchmark for the short paper.** 26 systematic reviews ([SYNERGY](https://github.com/asreview/synergy-dataset), CC0). Each is its own corpus: the review's screened candidate pool, with its inclusions as the complete answer set and its eligibility criteria as the query (`_title` variants use only the review title). `synergy` means all 26. |
 | `synthetic` | any | 5 | N/5 | Offline smoke tests only. Never reported. |
+
+SYNERGY is built locally, because it needs network access:
+`python -m src.synergy_build` reads the labels at a pinned commit, fetches titles
+and abstracts from OpenAlex, fills missing abstracts from PubMed where a record
+has a PMID, and writes `data/synergy/` (not in git; `chtc/upload.sh` copies it).
+About 30% of records stay title-only, close to the official build; screeners see
+those records too. Pools are never merged, since a record in one review's pool
+was never screened against another review's criteria. Records are shuffled with
+a fixed seed, because the source files list inclusions first.
+
+RCV1 would also fit, but its text needs a signed NIST agreement; the public
+scikit-learn version is TF-IDF vectors only.
 
 20 Newsgroups is loaded with headers, footers and quoted replies stripped. The
 headers contain the newsgroup name; leaving them in makes the task trivial and
@@ -389,7 +404,8 @@ src/
   crossover.py     performance model, equal-time comparison, exchange rates
   report_figs.py   final report figures
   kev_scan.py      scan with Kev, in its own environment on CHTC
-  kev_compare.py   Kev against Qwen from saved scores, and against the agent at equal time
+  jev_scan.py      scan with JEV-9B (transformers + peft), on CHTC
+  kev_compare.py   Kev or JEV against Qwen from saved scores, and against the agent at equal time
   index_costs.py   HNSW build, insert and deep-k recall (needs hnswlib)
   arms/
     classify.py    Approach B  (+ MockDecisionModel for offline tests)
@@ -460,10 +476,33 @@ The two contributions are adaptive k and the exchange rate.
 
 - [x] Kev-9B scan on 20 Newsgroups (1K, 5K, 10K), NFCorpus and the logic queries,
       one query at a time and packed (`chtc/kev.sub`, `src.kev_compare`)
-- [ ] Decide whether JEV-9B adds anything over Kev (its license is not yet confirmed)
-- [ ] Write the final report. The story changes: low recall was mostly a Qwen
-      problem, so the scan-against-agent result gets stronger with a real
-      decision model, and the threshold finding becomes a zero-shot caveat.
+- [ ] JEV-9B scan on the same settings (Apache-2.0, pinned revision 7ac669b).
+      Pilot done: N = 1K F1 0.61 at t = 0.5 (Qwen 0.40, Kev 0.63), 81 decisions/s,
+      which is close to compute-bound for a 9B prefill (Kev reaches 540 only by
+      packing queries). Sweep running as jobs 12437151-53.
+      Compare with `python -m src.kev_compare --model jev`.
+
+### Short paper (decided Nov 7)
+
+Target a 4-page short paper. Reviewers will ask why an LLM is needed, whether
+the agent is a strawman, and whether 10K documents is enough.
+
+- [ ] Cheap baselines (`src/baselines.py`, `src/rerank_scan.py`). Offline so far,
+      with tuned cutoffs: BM25 F1 0.37 and embeddings 0.48 against Qwen 0.58 and
+      Kev 0.65 at 20NG 10K; WSS@95 0.04 / 0.41 / 0.55 / 0.74. On the logic queries
+      BM25 and embeddings reach 0.31-0.32 against 0.58 and 0.77. On NFCorpus BM25
+      ties Qwen (0.16 against 0.12, CI crosses 0) and Kev is best (0.18).
+      Cross-encoders (bge-reranker-v2-m3, ms-marco-MiniLM) running as jobs
+      12437161-66 (`chtc/scan.sub`).
+- [ ] SYNERGY as the main benchmark: loader done, data build running. Then
+      embeddings, Qwen scan and agent, Kev, JEV and rerankers on all 26 reviews.
+- [ ] A stronger agent: keyword search as a second tool, and a larger model.
+- [ ] arXiv metadata (CC0) at 100K and 1M documents, for the crossover at scale.
+- [ ] Rewrite `report/` as the 4-page paper.
+- [ ] Final report: draft in `report/report.tex` (LaTeX, compile on Overleaf),
+      complete except the JEV-9B results. The story changes: low recall was
+      mostly a Qwen problem, so the scan-against-agent result gets stronger with
+      a real decision model, and the threshold finding becomes a zero-shot caveat.
 
 ### Future work
 
@@ -482,6 +521,7 @@ We are skipping the confidence cascade because it is too close to JEVDB.
 - [Choppy](https://arxiv.org/abs/2004.13012), [AttnCut](https://arxiv.org/abs/2102.12793)
 - [Ranked List Truncation for LLM-based Re-Ranking](https://arxiv.org/abs/2404.18185)
 - [Adaptive-k](https://arxiv.org/abs/2506.08479)
-- [Heuristic Stopping Rules for TAR](https://arxiv.org/abs/2106.09871)
+- [Heuristic Stopping Rules for TAR](https://arxiv.org/abs/2106.09871) (Yang, Lewis and Frieder 2021)
+- [Engineering Quality and Reliability in TAR](https://cormack.uwaterloo.ca/reliability) (Cormack and Grossman, SIGIR 2016)
 - [Semantic Operators (LOTUS)](https://arxiv.org/abs/2407.11418)
 - [Fast LLM-Based Semantic Filtering](https://arxiv.org/abs/2606.08090)

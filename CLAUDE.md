@@ -20,6 +20,10 @@ Keep this file and `README.md` updated with progress as work happens.
   all datasets: it fixes most of the scan's recall and threshold problems, so the
   report treats low recall as a zero-shot Qwen limit. JEV-9B only if it adds
   something. Laya is skipped.
+- Aim for a 4-page short paper (decided Nov 7). Main benchmark: SYNERGY (26
+  systematic reviews, one corpus and one query each, never pooled). arXiv
+  metadata for scale. 20 Newsgroups stays as the development set. RCV1 needs a
+  signed NIST agreement, so it is not planned.
 - Contribution before Dec 7: the exchange rate (one agent step buys N
   classification decisions) and adaptive k. Query rewriting is future work. Skip
   the confidence cascade, which is too close to JEVDB.
@@ -31,7 +35,7 @@ Keep this file and `README.md` updated with progress as work happens.
 
 ## Running on CHTC
 
-`ssh chtc` needs an interactive login, and port 22 may need the VPN. Claude reuses that connection, so it has to be open.
+`ssh chtc` needs an interactive login. Claude reuses that connection, so it has to be open.
 
 ```bash
 bash chtc/upload.sh                 # copies to ~/ThinkFast-QueryFaster on ap2001
@@ -64,6 +68,9 @@ AGENT_STEPS AGENT_CONCURRENCY AGENT_REPLICAS MAX_CHARS GPU LENGTH`.
 - **`getpwuid(): uid not found`:** the container has no user for HTCondor's uid,
   which kills torch inductor. `run_kev.sh` sets `USER`, `LOGNAME` and the
   inductor and Triton cache dirs.
+- **SYNERGY data:** build it locally with `python -m src.synergy_build` (needs
+  network), then `chtc/upload.sh` copies `data/`. Datasets accept comma lists and
+  `synergy` for all 26; a size above the pool size means the whole pool.
 - **Token budget:** `max_num_batched_tokens` defaults to 2048, which limits
   prefill-only work. The runner sets batch size x 512. Don't size it from
   `max_model_len`: at batch size 256 that means profiling a 524K-token step.
@@ -79,6 +86,10 @@ AGENT_STEPS AGENT_CONCURRENCY AGENT_REPLICAS MAX_CHARS GPU LENGTH`.
   saved scores. Compare rules with fixed k at equal mean cost, never by eye.
 - Kev job: `condor_submit GPU='H200$' TAG=kev9b DATASET=... SIZES=... chtc/kev.sub`
   (also `MODES MAX_QUERIES LENGTH`). `python -m src.kev_compare` compares offline.
+- Scan jobs in the Python 3.12 environment: `condor_submit MODULE=jev_scan|rerank_scan
+  MODEL=bge|minilm|- TAG=... DATASET=... SIZES=... chtc/scan.sub`. It transfers
+  `data/`. `chtc/jev.sub` is the older JEV-only version. Pinned HF revision; stock transformers Qwen3.5, so no
+  repo code runs. Compare with `python -m src.kev_compare --model jev`.
 - `src/kev_scan.py` runs only in Kev's environment through `chtc/run_kev.sh`, pinned
   to a commit whose code was read. Kev's code has not been run on this Mac.
 - `SearchAgent._steps` is a generator, so `find` and `run_many` share one loop.
@@ -87,6 +98,9 @@ AGENT_STEPS AGENT_CONCURRENCY AGENT_REPLICAS MAX_CHARS GPU LENGTH`.
   `timeout` command on this Mac.
 
 ## Progress
+
+The final report is `report/report.tex` with `refs.bib` and `figs/`, compiled on
+Overleaf (no LaTeX on this Mac or on CHTC). Keep its numbers in step with README.
 
 Results and status are in the Status section of `README.md`. The midterm deck is
 https://claude.ai/artifact/E1R5FHuvJHniGchsHttgeE (10 slides plus a backup, with

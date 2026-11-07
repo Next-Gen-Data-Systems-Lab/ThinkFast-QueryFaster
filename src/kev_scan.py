@@ -89,7 +89,7 @@ def write(stem: Path, base: dict, mode: str, timed: list, sub: D.Corpus, thresho
                         "docs_per_sec": len(by_doc) / seconds})
             rows.write(json.dumps({**base, "kev_mode": mode,
                                    **M.flatten(result, q.gold)}) + "\n")
-            saved.write(json.dumps({"arm": "classify", "query_id": q.id,
+            saved.write(json.dumps({"arm": "classify", "dataset": sub.name, "query_id": q.id,
                                     "corpus_size": len(sub.docs), "batch_size": BATCH,
                                     "k": None, "gold": sorted(q.gold),
                                     "scores": by_doc}) + "\n")
@@ -101,7 +101,8 @@ def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--run", default="jaredpalmer/kev-9b@v1.0")
-    p.add_argument("--dataset", default="20newsgroups", choices=sorted(D.LOADERS))
+    p.add_argument("--dataset", default="20newsgroups",
+                   help="comma-separated; 'synergy' means all 26 reviews")
     p.add_argument("--corpus-sizes", default="1000")
     p.add_argument("--modes", default="separate,packed")
     p.add_argument("--tag", default="kev")
@@ -116,13 +117,10 @@ def main(argv=None):
 
     server, opts = build(args.run)
     gpu = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu"
-    full = D.load(args.dataset, **({} if args.dataset == "synthetic"
-                                   else {"max_chars": args.max_chars}))
     results = Path(args.results)
     results.mkdir(exist_ok=True)
 
-    for n in [int(x) for x in args.corpus_sizes.split(",") if x.strip()]:
-        sub = full.subsample(n, seed=args.seed)
+    for sub in D.subsets(args.dataset, args.corpus_sizes, args.max_chars, args.seed):
         queries = sub.queries[: args.max_queries] if args.max_queries else sub.queries
         base = {"dataset": sub.name, "corpus_size": len(sub.docs), "batch_size": BATCH,
                 "k": None, "model": args.run, "gpu": gpu, "kev_graphs": opts.cuda_graphs,

@@ -3,8 +3,9 @@
   "dataset": "20newsgroups",
   "n": 1000,
   "queries": 20,
-  "kev_rate_separate": 114.67468067879756,
-  "kev_rate_packed": 518.4223077361748,
+  "scores": "results/20newsgroups_kev9b_packed",
+  "dm_rate_separate": 114.67468067879756,
+  "dm_rate_packed": 518.4223077361748,
   "qwen": {
    "half": [
     0.28854462645571394,
@@ -31,7 +32,7 @@
     ]
    }
   },
-  "kev": {
+  "dm": {
    "half": [
     0.7648483884446884,
     0.5850935525305513,
@@ -99,7 +100,7 @@
      "ties": 0
     }
    },
-   "kev_separate": {
+   "dm_separate": {
     "k": 243,
     "recall": 0.6803653165282542,
     "vs_agent": {
@@ -110,7 +111,7 @@
      "ties": 0
     }
    },
-   "kev_packed": {
+   "dm_packed": {
     "k": 1000,
     "recall": 0.7648483884446884,
     "vs_agent": {
@@ -127,8 +128,9 @@
   "dataset": "20newsgroups",
   "n": 5000,
   "queries": 20,
-  "kev_rate_separate": 120.20728700088156,
-  "kev_rate_packed": 538.1204482585823,
+  "scores": "results/20newsgroups_kev9bfull_packed",
+  "dm_rate_separate": 120.20728700088156,
+  "dm_rate_packed": 538.1204482585823,
   "qwen": {
    "half": [
     0.3046138956164747,
@@ -160,7 +162,7 @@
     ]
    }
   },
-  "kev": {
+  "dm": {
    "half": [
     0.7788230231825235,
     0.5875016444183785,
@@ -233,7 +235,7 @@
      "ties": 0
     }
    },
-   "kev_separate": {
+   "dm_separate": {
     "k": 555,
     "recall": 0.5845161225188262,
     "vs_agent": {
@@ -244,7 +246,7 @@
      "ties": 0
     }
    },
-   "kev_packed": {
+   "dm_packed": {
     "k": 2488,
     "recall": 0.7536238427866155,
     "vs_agent": {
@@ -261,8 +263,9 @@
   "dataset": "20newsgroups",
   "n": 10000,
   "queries": 20,
-  "kev_rate_separate": 121.04046950895918,
-  "kev_rate_packed": 539.5243007225133,
+  "scores": "results/20newsgroups_kev9bfull_packed",
+  "dm_rate_separate": 121.04046950895918,
+  "dm_rate_packed": 539.5243007225133,
   "qwen": {
    "half": [
     0.3101185582838132,
@@ -294,7 +297,7 @@
     ]
    }
   },
-  "kev": {
+  "dm": {
    "half": [
     0.7821968221771003,
     0.5825229613707219,
@@ -367,7 +370,7 @@
      "ties": 0
     }
    },
-   "kev_separate": {
+   "dm_separate": {
     "k": 605,
     "recall": 0.47490146007048306,
     "vs_agent": {
@@ -378,7 +381,7 @@
      "ties": 0
     }
    },
-   "kev_packed": {
+   "dm_packed": {
     "k": 2696,
     "recall": 0.7083645247811621,
     "vs_agent": {
@@ -395,8 +398,9 @@
   "dataset": "nfcorpus",
   "n": 3633,
   "queries": 50,
-  "kev_rate_separate": 81.13654791217577,
-  "kev_rate_packed": 724.4317966658748,
+  "scores": "results/nfcorpus_kev9b_packed",
+  "dm_rate_separate": 81.13654791217577,
+  "dm_rate_packed": 724.4317966658748,
   "qwen": {
    "half": [
     0.19593094157308982,
@@ -428,7 +432,7 @@
     ]
    }
   },
-  "kev": {
+  "dm": {
    "half": [
     0.25029835492947344,
     0.24133634703521983,
@@ -492,8 +496,9 @@
   "dataset": "20newsgroups_logic",
   "n": 1000,
   "queries": 25,
-  "kev_rate_separate": null,
-  "kev_rate_packed": 530.8415034700496,
+  "scores": "results/20newsgroups_logic_kev9b_packed",
+  "dm_rate_separate": null,
+  "dm_rate_packed": 530.8415034700496,
   "qwen": {
    "half": [
     0.6120662236277228,
@@ -520,7 +525,7 @@
     ]
    }
   },
-  "kev": {
+  "dm": {
    "half": [
     0.924802672110052,
     0.6493527568096238,
@@ -588,7 +593,7 @@
       0.7657820320786699
      ]
     },
-    "kev": {
+    "dm": {
      "half": [
       1.0,
       0.6728289692763377,
@@ -614,7 +619,7 @@
       0.5206349206349207
      ]
     },
-    "kev": {
+    "dm": {
      "half": [
       1.0,
       0.4515497076023392,
@@ -640,7 +645,7 @@
       0.5463516539072656
      ]
     },
-    "kev": {
+    "dm": {
      "half": [
       0.7966936848212512,
       0.8100124135124135,
@@ -666,7 +671,7 @@
       0.16515141834909275
      ]
     },
-    "kev": {
+    "dm": {
      "half": [
       0.7841495946612596,
       0.6865422285752789,
@@ -685,8 +690,9 @@
   "dataset": "20newsgroups_logic",
   "n": 10000,
   "queries": 25,
-  "kev_rate_separate": null,
-  "kev_rate_packed": 551.0651619575358,
+  "scores": "results/20newsgroups_logic_kev9b_packed",
+  "dm_rate_separate": null,
+  "dm_rate_packed": 551.0651619575358,
   "qwen": {
    "half": [
     0.5812080516795594,
@@ -718,7 +724,7 @@
     ]
    }
   },
-  "kev": {
+  "dm": {
    "half": [
     0.9181407755997505,
     0.5983236804044586,
@@ -791,7 +797,7 @@
       0.707474752267161
      ]
     },
-    "kev": {
+    "dm": {
      "half": [
       0.9985915492957746,
       0.6018112563987955,
@@ -817,7 +823,7 @@
       0.5822320003097141
      ]
     },
-    "kev": {
+    "dm": {
      "half": [
       0.9663503934337269,
       0.3972702767557695,
@@ -843,7 +849,7 @@
       0.5358305509902346
      ]
     },
-    "kev": {
+    "dm": {
      "half": [
       0.8123303072039663,
       0.7933685858091306,
@@ -869,7 +875,7 @@
       0.2857627653009444
      ]
     },
-    "kev": {
+    "dm": {
      "half": [
       0.7769625001034552,
       0.6473787141358105,

@@ -107,7 +107,8 @@ def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--dataset", default="20newsgroups",
-                   choices=sorted(D.LOADERS))
+                   help="one or more comma-separated names; 'synergy' means all 26 "
+                        "reviews. Corpus sizes above a pool's size use the whole pool.")
     p.add_argument("--arms", default="classify,ann,hybrid")
     p.add_argument("--model", default="Qwen/Qwen2.5-7B-Instruct",
                    help="decision model, or 'mock' for an offline smoke test")
@@ -164,10 +165,16 @@ def main(argv=None):
     print(f"[runner] corpus_sizes={sizes} batch_sizes={batches} k={args.k}", flush=True)
     print(f"[runner] gpu={stamp['gpu']} resume={len(seen)} rows already done", flush=True)
 
-    kw = {} if args.dataset == "synthetic" else {"max_chars": args.max_chars}
-    full = D.load(args.dataset, **kw)
-    print(f"[runner] loaded {len(full.docs)} docs, {len(full.queries)} queries "
-          f"[{D.fingerprint(full)}]", flush=True)
+    names = D.expand(args.dataset)
+    unknown = [n for n in names if n not in D.LOADERS]
+    if unknown:
+        p.error(f"unknown dataset(s) {unknown}")
+    fulls = []
+    for name in names:
+        full = D.load(name, **({} if name == "synthetic" else {"max_chars": args.max_chars}))
+        print(f"[runner] loaded {name}: {len(full.docs)} docs, {len(full.queries)} queries "
+              f"[{D.fingerprint(full)}]", flush=True)
+        fulls.append(full)
 
     writer = Writer(out)
     score_writer = Writer(Path(args.scores_out)) if args.scores_out else None
@@ -192,8 +199,10 @@ def main(argv=None):
                 )
                 print(f"[runner]   ready in {time.perf_counter()-t0:.1f}s", flush=True)
 
-            for n in sizes:
+            for full, n in [(f, n) for f in fulls for n in sizes]:
                 sub = full.subsample(n, seed=args.seed)
+                if any(len(full.docs) <= m < n for m in sizes):
+                    continue    # a smaller size already used the whole pool
                 qs = sub.queries[: args.max_queries] if args.max_queries else sub.queries
                 docs_by_id = {d.id: d for d in sub.docs}
                 golds = {q.id: q.gold for q in qs}
@@ -276,7 +285,7 @@ def main(argv=None):
                         # last score row, rather than the row having no scores.
                         if score_writer and r.scores:
                             score_writer.write({
-                                "arm": arm, "query_id": q.id,
+                                "arm": arm, "dataset": sub.name, "query_id": q.id,
                                 "corpus_size": len(sub.docs), "batch_size": bs,
                                 "k": kk, "gold": sorted(q.gold),
                                 "scores": r.scores,

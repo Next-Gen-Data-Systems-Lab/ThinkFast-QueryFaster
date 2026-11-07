@@ -1,6 +1,6 @@
 """Corpus loading and query sets.
 
-Two datasets, both with complete ground truth for "find all matching documents":
+Datasets with complete ground truth for "find all matching documents":
 
   20 Newsgroups  -- 18,846 docs, 20 categories. Every doc carries a category
                     label, so a query like "documents about computer graphics"
@@ -9,6 +9,10 @@ Two datasets, both with complete ground truth for "find all matching documents":
 
   NFCorpus       -- 3,633 docs, 323 test queries, ~38 relevant docs per query.
                     Real IR relevance judgments. Needs `datasets`.
+
+  SYNERGY        -- 26 systematic reviews, one dataset each (synergy_<review>):
+                    the screened candidate pool and the review's inclusions.
+                    Built locally by src.synergy_build into data/synergy/.
 
 Both expose the same interface:
 
@@ -314,12 +318,109 @@ def load_synthetic(n_docs: int = 2000, doc_words: int = 120, seed: int = 0) -> C
                   meta={"n_docs": n_docs, "doc_words": doc_words, "seed": seed})
 
 
+# --------------------------------------------------------------------------
+# SYNERGY systematic reviews (build first with `python -m src.synergy_build`)
+# --------------------------------------------------------------------------
+
+SYNERGY_KEYS = (
+    "Appenzeller-Herzog_2019", "Bos_2018", "Brouwer_2019", "Chou_2003", "Chou_2004",
+    "Donners_2021", "Hall_2012", "Jeyaraman_2020", "Leenaars_2019", "Leenaars_2020",
+    "Meijboom_2021", "Menon_2022", "Moran_2021", "Muthu_2021", "Nelson_2002",
+    "Oud_2018", "Radjenovic_2013", "Sep_2021", "Smid_2020", "van_de_Schoot_2018",
+    "van_der_Valk_2021", "van_der_Waal_2022", "van_Dis_2020", "Walker_2018",
+    "Wassenaar_2017", "Wolters_2018",
+)
+
+
+def synergy_dir() -> "Path":
+    import os
+    from pathlib import Path
+    return Path(os.environ.get("SYNERGY_DIR",
+                               Path(__file__).resolve().parent.parent / "data" / "synergy"))
+
+
+def load_synergy(review: str, max_chars: int = 2000, query: str = "criteria") -> Corpus:
+    """One systematic review: its screened candidate pool, one find-all query.
+
+    Every record in the pool was screened, so the review's inclusions are the
+    complete answer set for that pool. Pools are never merged, because a record
+    in one review's pool was never screened against another review's criteria.
+    Title-only records stay in: screeners saw them too.
+
+    query = "criteria"  the review's published eligibility criteria (default)
+            "title"     only the review's title
+    """
+    import gzip
+    import json
+
+    root = synergy_dir()
+    meta = json.loads((root / "reviews.json").read_text())[review]
+    docs, gold = [], set()
+    with gzip.open(root / f"{review}.jsonl.gz", "rt") as fh:
+        for line in fh:
+            r = json.loads(line)
+            text = _clean(f"{r['title']}\n\n{r['abstract']}", max_chars) or "(no title)"
+            docs.append(Doc(r["id"], text))
+            if r["label"]:
+                gold.add(r["id"])
+    # Source files often list inclusions first; no arm may see label order.
+    random.Random(0).shuffle(docs)
+    ask = f'Studies to include in the systematic review "{meta["title"]}".'
+    if query == "criteria":
+        ask += f"\nEligibility criteria:\n{meta['criteria']}"
+    elif query != "title":
+        raise ValueError(f"query must be 'criteria' or 'title', not {query!r}")
+    suffix = "" if query == "criteria" else f"_{query}"
+    return Corpus(
+        name=f"synergy_{review}{suffix}",
+        docs=docs,
+        queries=[Query(f"syn_{review}{suffix}", ask, frozenset(gold))],
+        meta={"max_chars": max_chars, "query": query, "review": review,
+              "commit": meta.get("commit")},
+    )
+
+
+def _synergy_loader(review: str, query: str):
+    def loader(max_chars: int = 2000) -> Corpus:
+        return load_synergy(review, max_chars=max_chars, query=query)
+    return loader
+
+
 LOADERS = {
     "20newsgroups": load_20newsgroups,
     "20newsgroups_logic": load_20newsgroups_logic,
     "nfcorpus": load_nfcorpus,
     "synthetic": load_synthetic,
 }
+for _key in SYNERGY_KEYS:
+    LOADERS[f"synergy_{_key}"] = _synergy_loader(_key, "criteria")
+    LOADERS[f"synergy_{_key}_title"] = _synergy_loader(_key, "title")
+
+
+def expand(names: str) -> list[str]:
+    """Comma-separated dataset names; "synergy" means every review, criteria queries."""
+    out = []
+    for name in (n.strip() for n in names.split(",")):
+        if name == "synergy":
+            out += [f"synergy_{k}" for k in SYNERGY_KEYS]
+        elif name:
+            out.append(name)
+    return out
+
+
+def subsets(names: str, sizes: str, max_chars: int = 2000, seed: int = 0):
+    """Yield each dataset at each corpus size, as the runner does.
+
+    A size above a pool's size uses the whole pool, once: SYNERGY pools range
+    from 257 to 48K records, so sizes=100000 runs every review in full.
+    """
+    ns = [int(x) for x in sizes.split(",") if x.strip()]
+    for name in expand(names):
+        full = load(name, **({} if name == "synthetic" else {"max_chars": max_chars}))
+        for n in ns:
+            if any(len(full.docs) <= m < n for m in ns):
+                continue
+            yield full.subsample(n, seed=seed)
 
 
 def load(name: str, **kw) -> Corpus:

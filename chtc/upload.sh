@@ -15,8 +15,14 @@ cd "$PROJECT"
 ssh "$HOST" "mkdir -p '$REMOTE_DIR/logs'"
 # Named files only, so chtc/.env never leaves this machine.
 rsync -aR --exclude='__pycache__' --exclude='*.pyc' \
-    src chtc/run.sh chtc/run_kev.sh chtc/midterm.sub chtc/kev.sub requirements.txt \
+    src chtc/run.sh chtc/run_kev.sh chtc/run_jev.sh chtc/run_scan.sh \
+    chtc/midterm.sub chtc/kev.sub chtc/jev.sub chtc/scan.sub requirements.txt \
     "$HOST:$REMOTE_DIR/"
+# Built data (src.synergy_build). scan.sub transfers data/, so it must exist.
+ssh "$HOST" "mkdir -p '$REMOTE_DIR/data'"
+if [ -d data ]; then
+    rsync -a data/ "$HOST:$REMOTE_DIR/data/"
+fi
 
 echo "Uploaded to $HOST:$REMOTE_DIR. To submit:"
 echo "  ssh $HOST"

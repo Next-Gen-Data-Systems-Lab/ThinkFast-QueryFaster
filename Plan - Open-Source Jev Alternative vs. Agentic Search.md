@@ -62,25 +62,27 @@ These are starting approximations. Real batching, memory bandwidth, context leng
 
 # 3\. Work plan
 
-Nabanita owns all of this work. Status as of Nov 6:
+Nabanita owns all of this work. Status as of Nov 7:
 
 ## LLM and inference engine
 
 - [x] Serve Qwen2.5-7B-Instruct with vLLM 0.6.3 on CHTC
 - [x] Build the search agent on the same engine as the classifier
-- [ ] Measure agent cost per step (job submitted)
+- [x] Measure agent cost per step: 0.46 s one at a time, 0.06 s with about 50 queries in flight
 
 ## Classifier
 
 - [x] Single-token yes/no classifier on Qwen2.5-7B-Instruct, as a Jev-style stand-in
 - [x] Batch-size test on an A100 40GB: throughput levels off around batch size 16-32
-- [ ] Full sweep across corpus sizes (job submitted)
-- [ ] Test Laya or Kev behind the same interface
+- [x] Full sweep across corpus sizes (1K, 5K, 10K) and batch sizes
+- [x] Test Kev behind the same interface (Kev-9B, all datasets); Laya skipped
+- [ ] JEV-9B as a second decision model (jobs running)
 
 ## Dataset, evaluation, and midway summary
 
 - [x] 20 Newsgroups as the primary corpus: every document is labelled, so the answer set for each query is complete
 - [x] Metrics: recall, precision, F1, ranking quality, latency, documents per second, GPU memory
-- [ ] Add simple keyword and multi-condition queries
-- [ ] Fit the performance model and plot the crossover
-- [ ] Write the midway summary
+- [x] Add simple keyword and multi-condition queries (`20newsgroups_logic`, 25 queries)
+- [x] Fit the performance model and plot the crossover
+- [x] Write the midway summary (midterm deck)
+- [ ] Final report (`report/`, LaTeX)

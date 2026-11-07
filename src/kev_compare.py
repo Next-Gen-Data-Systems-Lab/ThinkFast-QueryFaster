@@ -1,4 +1,5 @@
-"""Kev-9B against zero-shot Qwen2.5-7B as the scan's classifier, on the same documents.
+"""A decision model (Kev-9B or JEV-9B) against zero-shot Qwen2.5-7B as the scan's
+classifier, on the same documents.
 
 For each setting, both scans scored every (query, document) pair. This replays
 them offline:
@@ -10,10 +11,12 @@ them offline:
   hybrid      top k by embedding, then classify, at k = 100 and 1,000
   equal time  the scan in embedding order, given the agent's measured seconds
 
-Differences are Kev minus Qwen, with a bootstrap 95% interval over queries.
+Differences are the decision model minus Qwen, with a bootstrap 95% interval over
+queries. Kev is scored from its packed run and JEV from its only (separate) run;
+Kev's two modes give the same scores.
 Needs the saved embedding rankings from src.embed_ranks.
 
-Usage: python -m src.kev_compare
+Usage: python -m src.kev_compare [--model jev]
 """
 
 from __future__ import annotations
@@ -28,16 +31,18 @@ import pandas as pd
 from . import access_paths as AP
 from .crossover import AGENT, RATE
 
+# {m} is the model: kev or jev.
 SETTINGS = [
-    ("20newsgroups", 1000, "results/20newsgroups_sweep_bs32", "results/20newsgroups_kev9b"),
-    ("20newsgroups", 5000, "results/20newsgroups_sweep_bs32", "results/20newsgroups_kev9bfull"),
-    ("20newsgroups", 10000, "results/20newsgroups_sweep_bs32", "results/20newsgroups_kev9bfull"),
-    ("nfcorpus", 3633, "results/nfcorpus_nf", "results/nfcorpus_kev9b"),
+    ("20newsgroups", 1000, "results/20newsgroups_sweep_bs32", "results/20newsgroups_{m}9b"),
+    ("20newsgroups", 5000, "results/20newsgroups_sweep_bs32", "results/20newsgroups_{m}9bfull"),
+    ("20newsgroups", 10000, "results/20newsgroups_sweep_bs32", "results/20newsgroups_{m}9bfull"),
+    ("nfcorpus", 3633, "results/nfcorpus_nf", "results/nfcorpus_{m}9b"),
     ("20newsgroups_logic", 1000, "results/20newsgroups_logic_logic",
-     "results/20newsgroups_logic_kev9b"),
+     "results/20newsgroups_logic_{m}9b"),
     ("20newsgroups_logic", 10000, "results/20newsgroups_logic_logic",
-     "results/20newsgroups_logic_kev9b"),
+     "results/20newsgroups_logic_{m}9b"),
 ]
+SCORED = {"kev": "packed", "jev": "separate"}
 KS = (100, 1000)
 BINS = 10
 
@@ -86,18 +91,18 @@ def rate(stem: str, mode: str, n: int) -> float | None:
     return float(n * len(r) / r.t_total.sum())
 
 
-def setting(dataset: str, n: int, qwen: str, kev: str) -> dict:
+def setting(dataset: str, n: int, qwen: str, dm: str, mode: str = "packed") -> dict:
     qs = {q.id: q for q in AP.load(dataset, n, f"{qwen}.scores.jsonl")}
-    ks = {q.id: q for q in AP.load(dataset, n, f"{kev}_packed.scores.jsonl")}
+    ks = {q.id: q for q in AP.load(dataset, n, f"{dm}_{mode}.scores.jsonl")}
     ids = sorted(set(qs) & set(ks))
     Q, K = [qs[i] for i in ids], [ks[i] for i in ids]
     assert all((a.gold == b.gold).all() for a, b in zip(Q, K)), "different documents"
-    qr, kr = rows(f"{qwen}.jsonl", n).loc[ids], rows(f"{kev}_packed.jsonl", n).loc[ids]
+    qr, kr = rows(f"{qwen}.jsonl", n).loc[ids], rows(f"{dm}_{mode}.jsonl", n).loc[ids]
 
-    out = {"dataset": dataset, "n": n, "queries": len(ids),
-           "kev_rate_separate": rate(kev, "separate", n),
-           "kev_rate_packed": rate(kev, "packed", n)}
-    for name, (A, r) in (("qwen", (Q, qr)), ("kev", (K, kr))):
+    out = {"dataset": dataset, "n": n, "queries": len(ids), "scores": f"{dm}_{mode}",
+           "dm_rate_separate": rate(dm, "separate", n),
+           "dm_rate_packed": rate(dm, "packed", n)}
+    for name, (A, r) in (("qwen", (Q, qr)), ("dm", (K, kr))):
         half = np.array([AP.quality(q, q.n, 0.5) for q in A])
         held, chosen = held_out(A)
         out[name] = {"half": half.mean(axis=0).tolist(), "held": held.mean(axis=0).tolist(),
@@ -108,10 +113,10 @@ def setting(dataset: str, n: int, qwen: str, kev: str) -> dict:
                                 for k in KS if k < n}}
         out[name]["_half"], out[name]["_held"] = half, held
         out[name]["_r100"] = r["recall@100"].values
-    out["d_f1_half"] = diff(out["kev"]["_half"][:, 2], out["qwen"]["_half"][:, 2])
-    out["d_f1_held"] = diff(out["kev"]["_held"][:, 2], out["qwen"]["_held"][:, 2])
-    out["d_recall_held"] = diff(out["kev"]["_held"][:, 0], out["qwen"]["_held"][:, 0])
-    out["d_recall@100"] = diff(out["kev"]["_r100"], out["qwen"]["_r100"])
+    out["d_f1_half"] = diff(out["dm"]["_half"][:, 2], out["qwen"]["_half"][:, 2])
+    out["d_f1_held"] = diff(out["dm"]["_held"][:, 2], out["qwen"]["_held"][:, 2])
+    out["d_recall_held"] = diff(out["dm"]["_held"][:, 0], out["qwen"]["_held"][:, 0])
+    out["d_recall@100"] = diff(out["dm"]["_r100"], out["qwen"]["_r100"])
 
     if dataset == "20newsgroups_logic":
         shapes = {}
@@ -119,7 +124,7 @@ def setting(dataset: str, n: int, qwen: str, kev: str) -> dict:
             idx = [i for i, q in enumerate(ids) if q.startswith(shape + "_")]
             shapes[shape] = {m: {"half": out[m]["_half"][idx].mean(axis=0).tolist(),
                                  "held": out[m]["_held"][idx].mean(axis=0).tolist()}
-                             for m in ("qwen", "kev")}
+                             for m in ("qwen", "dm")}
         out["shapes"] = shapes
 
     if dataset == "20newsgroups" and Path(AGENT).exists():
@@ -130,15 +135,17 @@ def setting(dataset: str, n: int, qwen: str, kev: str) -> dict:
         seconds = float(a.wall_s.mean())
         eq = {"agent_s": seconds, "agent_recall": float(a.recall.mean())}
         for name, A, docs_per_s in (("qwen", Q, RATE),
-                                    ("kev_separate", K, out["kev_rate_separate"]),
-                                    ("kev_packed", K, out["kev_rate_packed"])):
+                                    ("dm_separate", K, out["dm_rate_separate"]),
+                                    ("dm_packed", K, out["dm_rate_packed"])):
+            if docs_per_s is None:
+                continue
             k = min(n, int(seconds * docs_per_s))
             plan = AP.rows_for(A, [k] * len(A), 0.5)
             eq[name] = {"k": k, "recall": float(plan["recall"].mean()),
                         "vs_agent": diff(plan["recall"], a.recall.values)}
         out["equal_time"] = eq
 
-    for name in ("qwen", "kev"):
+    for name in ("qwen", "dm"):
         for key in ("_half", "_held", "_r100"):
             out[name].pop(key)
     return out
@@ -153,8 +160,9 @@ def show(r: dict) -> None:
                 f"wins {x['wins']}, ties {x['ties']}")
 
     print(f"\n== {r['dataset']} N={r['n']} ({r['queries']} queries)  "
-          f"Kev docs/s separate {r['kev_rate_separate'] or 0:.0f}, packed {r['kev_rate_packed']:.0f}")
-    for m in ("qwen", "kev"):
+          f"model docs/s separate {r['dm_rate_separate'] or 0:.0f}, "
+          f"packed {r['dm_rate_packed'] or 0:.0f}")
+    for m in ("qwen", "dm"):
         x = r[m]
         hy = "  ".join(f"k={k}: {f(v)}" for k, v in x["hybrid"].items())
         print(f"  {m:4s} t=.5 R P F1 {f(x['half'])} | held-out (t~{x['median_t']:.0e}) {f(x['held'])}"
@@ -162,15 +170,15 @@ def show(r: dict) -> None:
               f" | ECE {x['ece']:.3f} Brier {x['brier']:.4f}"
               f" P>=.5: mean p {x['mean_p_above_half'] or 0:.2f} actual {x['precision_above_half'] or 0:.2f}")
         print(f"       hybrid t=.5 {hy}")
-    print(f"  Kev-Qwen  F1 t=.5 {ci(r['d_f1_half'])}  F1 held {ci(r['d_f1_held'])}"
+    print(f"  model-Qwen  F1 t=.5 {ci(r['d_f1_half'])}  F1 held {ci(r['d_f1_held'])}"
           f"  R held {ci(r['d_recall_held'])}  R@100 {ci(r['d_recall@100'])}")
     for shape, v in r.get("shapes", {}).items():
         print(f"    {shape:3s} qwen half {f(v['qwen']['half'])} held {f(v['qwen']['held'])}"
-              f" | kev half {f(v['kev']['half'])} held {f(v['kev']['held'])}")
+              f" | dm half {f(v['dm']['half'])} held {f(v['dm']['held'])}")
     if "equal_time" in r:
         e = r["equal_time"]
         print(f"  equal time: agent {e['agent_s']:.1f}s R {e['agent_recall']:.3f}")
-        for name in ("qwen", "kev_separate", "kev_packed"):
+        for name in [k for k in ("qwen", "dm_separate", "dm_packed") if k in e]:
             x = e[name]
             print(f"    {name:13s} k={x['k']:5d} R {x['recall']:.3f}  vs agent {ci(x['vs_agent'])}")
 
@@ -178,14 +186,18 @@ def show(r: dict) -> None:
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--out", default="results/kev_compare.json")
+    p.add_argument("--model", default="kev", choices=sorted(SCORED))
+    p.add_argument("--out", default=None, help="default results/{model}_compare.json")
     args = p.parse_args(argv)
+    args.out = args.out or f"results/{args.model}_compare.json"
+    mode = SCORED[args.model]
     out = []
-    for s in SETTINGS:
-        if not Path(f"{s[3]}_packed.scores.jsonl").exists():
-            print("skip, no Kev scores:", s)
+    for dataset, n, qwen, stem in SETTINGS:
+        stem = stem.format(m=args.model)
+        if not Path(f"{stem}_{mode}.scores.jsonl").exists():
+            print("skip, no scores:", stem)
             continue
-        out.append(setting(*s))
+        out.append(setting(dataset, n, qwen, stem, mode))
         show(out[-1])
     Path(args.out).write_text(json.dumps(out, indent=1, default=str))
     print("\nwrote", args.out)
