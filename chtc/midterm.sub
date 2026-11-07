@@ -79,7 +79,7 @@ when_to_transfer_output = ON_EXIT_OR_EVICT
 executable              = chtc/run.sh
 arguments               = $(DATASET) $(MODEL) $(SIZES) $(BATCHES) $(K) $(TAG) $(ARMS) $(MAX_QUERIES) $(AGENT_STEPS) $(AGENT_CONCURRENCY) $(MAX_CHARS) $(AGENT_REPLICAS)
 
-transfer_input_files    = src, chtc/run.sh, requirements.txt
+transfer_input_files    = src, data, chtc/run.sh, requirements.txt
 transfer_output_files   = results, figs
 
 log                     = logs/$(Cluster)_$(Process).log

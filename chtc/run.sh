@@ -101,7 +101,8 @@ for BS in "${BATCH_LIST[@]}"; do
         --scores-out "$SCORES"
 done
 
-python3 -m src.analyze --results "$OUT" --outdir "figs/${DATASET}_${TAG}"
+python3 -m src.analyze --results "$OUT" --outdir "figs/${DATASET}_${TAG}" \
+    || echo "WARNING: src.analyze failed; results are unaffected"
 
 echo "=== done $(date -Is) ==="
 ls -la results figs

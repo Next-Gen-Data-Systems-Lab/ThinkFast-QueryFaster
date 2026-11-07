@@ -150,7 +150,9 @@ def main(argv=None):
     arms = [a.strip() for a in args.arms.split(",") if a.strip()]
     if not args.max_model_len:
         # Noisy text can run close to one token per character.
-        args.max_model_len = (8192 if args.max_chars > 2000
+        # SYNERGY prompts also carry eligibility criteria of up to 2,754 characters.
+        long_query = any(n.startswith("synergy") for n in D.expand(args.dataset))
+        args.max_model_len = (8192 if args.max_chars > 2000 or long_query
                               else 4096 if "agent" in arms else 2048)
     sizes = [int(x) for x in args.corpus_sizes.split(",") if x.strip()]
     batches = [int(x) for x in args.batch_sizes.split(",") if x.strip()]

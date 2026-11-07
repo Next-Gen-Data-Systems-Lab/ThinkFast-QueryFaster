@@ -16,7 +16,7 @@ inclusion. Text then comes from:
   OpenAlex  title and abstract for the rest, and the abstract for PubMed
             records that have none. OpenAlex now gives anonymous
             users a small daily budget per IP address, so set OPENALEX_API_KEY
-            (free) for anything large. Merged ids are fetched one at a time,
+            (free) in the environment or in the project's .env file. Merged ids are fetched one at a time,
             which follows the merge.
 
 Text already fetched from OpenAlex in an earlier build is reused, so a rebuild
@@ -80,9 +80,22 @@ def get(url: str, tries: int = 5, headers: dict | None = None) -> bytes:
     raise AssertionError
 
 
+def openalex_key() -> str:
+    """OPENALEX_API_KEY from the environment, else from the project's .env file.
+    Only that line is read, and the value is never printed."""
+    key = os.environ.get("OPENALEX_API_KEY", "").strip()
+    env = Path(__file__).resolve().parent.parent / ".env"
+    if not key and env.exists():
+        for line in env.read_text().splitlines():
+            name, _, value = line.partition("=")
+            if name.strip().removeprefix("export ").strip() == "OPENALEX_API_KEY":
+                key = value.strip().strip("'\"")
+    return key
+
+
 def openalex(url: str, tries: int = 5) -> dict:
     # The key goes in a header, so it never appears in a URL or an error message.
-    key = os.environ.get("OPENALEX_API_KEY", "").strip()
+    key = openalex_key()
     return json.loads(get(url, tries, {"Authorization": f"Bearer {key}"} if key else None))
 
 
@@ -261,7 +274,7 @@ def main(argv=None):
     only = {k for k in args.only.split(",") if k}
     index_path = out / "reviews.json"
     index = json.loads(index_path.read_text()) if index_path.exists() else {}
-    print("OpenAlex key:", "set" if os.environ.get("OPENALEX_API_KEY") else "not set", flush=True)
+    print("OpenAlex key:", "set" if openalex_key() else "not set", flush=True)
 
     skipped = []
     for ds in config["datasets"]:

@@ -40,7 +40,7 @@ when_to_transfer_output = ON_EXIT_OR_EVICT
 executable              = chtc/run_kev.sh
 arguments               = $(RUN) $(DATASET) $(SIZES) $(MODES) $(TAG) $(MAX_QUERIES)
 
-transfer_input_files    = src, chtc/run_kev.sh
+transfer_input_files    = src, data, chtc/run_kev.sh
 transfer_output_files   = results
 
 log                     = logs/$(Cluster)_$(Process).log
