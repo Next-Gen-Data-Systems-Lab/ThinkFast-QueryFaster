@@ -5,7 +5,8 @@ well that number separates the answer set. Compared on the same documents:
 
   bm25        Okapi BM25 on the query text (k1 = 1.2, b = 0.75), no model
   embed       cosine similarity, all-MiniLM-L6-v2 (the ANN arm's index)
-  qwen, kev, jev, ...   the LLM scans' P(yes), from their saved score files
+  qwen, kev, jev        the LLM scans' P(yes), from their saved score files
+  bge, minilm           cross-encoder rerankers (src.rerank_scan), sigmoid scores
 
 Per query:
   ap          average precision over the whole ranking
@@ -34,9 +35,9 @@ import numpy as np
 
 from . import access_paths as AP
 from . import data as D
+from .arms.keyword import KeywordIndex
 from .embed_ranks import path_for
 
-K1, B = 1.2, 0.75
 Z_GRID = list(np.arange(-1.0, 8.01, 0.25))
 
 # (label, dataset names, size, {scorer: score file}, max queries); "{d}" is the
@@ -45,52 +46,41 @@ SETTINGS = [
     ("20NG 1K", "20newsgroups", 1000, {
         "qwen": "results/20newsgroups_sweep_bs32.scores.jsonl",
         "kev": "results/20newsgroups_kev9b_packed.scores.jsonl",
-        "jev": "results/20newsgroups_jev9b_separate.scores.jsonl"}),
+        "jev": "results/20newsgroups_jev9b_separate.scores.jsonl",
+        "bge": "results/20newsgroups_bge_separate.scores.jsonl",
+        "minilm": "results/20newsgroups_minilm_separate.scores.jsonl"}),
     ("20NG 10K", "20newsgroups", 10000, {
         "qwen": "results/20newsgroups_sweep_bs32.scores.jsonl",
         "kev": "results/20newsgroups_kev9bfull_packed.scores.jsonl",
-        "jev": "results/20newsgroups_jev9bfull_separate.scores.jsonl"}),
+        "jev": "results/20newsgroups_jev9bfull_separate.scores.jsonl",
+        "bge": "results/20newsgroups_bge_separate.scores.jsonl",
+        "minilm": "results/20newsgroups_minilm_separate.scores.jsonl"}),
     ("Logic 10K", "20newsgroups_logic", 10000, {
         "qwen": "results/20newsgroups_logic_logic.scores.jsonl",
         "kev": "results/20newsgroups_logic_kev9b_packed.scores.jsonl",
-        "jev": "results/20newsgroups_logic_jev9b_separate.scores.jsonl"}),
+        "jev": "results/20newsgroups_logic_jev9b_separate.scores.jsonl",
+        "bge": "results/20newsgroups_logic_bge_separate.scores.jsonl",
+        "minilm": "results/20newsgroups_logic_minilm_separate.scores.jsonl"}),
     ("NFCorpus", "nfcorpus", 3633, {
         "qwen": "results/nfcorpus_nf.scores.jsonl",
         "kev": "results/nfcorpus_kev9b_packed.scores.jsonl",
-        "jev": "results/nfcorpus_jev9b_separate.scores.jsonl"}, 50),
+        "jev": "results/nfcorpus_jev9b_separate.scores.jsonl",
+        "bge": "results/nfcorpus_bge_separate.scores.jsonl",
+        "minilm": "results/nfcorpus_minilm_separate.scores.jsonl"}, 50),
     ("SYNERGY", "synergy", 100000, {
         "qwen": "results/synergy_qwen.scores.jsonl",
         "kev": "results/{d}_kev9b_packed.scores.jsonl",
-        "jev": "results/{d}_jev9b_separate.scores.jsonl"}),
+        "jev": "results/{d}_jev9b_separate.scores.jsonl",
+        "bge": "results/{d}_bge_separate.scores.jsonl",
+        "minilm": "results/{d}_minilm_separate.scores.jsonl"}),
 ]
 RAW = {"bm25", "embed"}      # not probabilities: z-score within the query
 
 
-def tokenizer():
-    from sklearn.feature_extraction.text import CountVectorizer
-    return CountVectorizer(stop_words="english", lowercase=True)
-
-
 def bm25(corpus: D.Corpus, queries: list[D.Query]) -> np.ndarray:
-    vec = tokenizer()
-    tf = vec.fit_transform([d.text for d in corpus.docs]).tocsc().astype(np.float64)
-    n = tf.shape[0]
-    length = np.asarray(tf.sum(axis=1)).ravel()
-    df = np.diff(tf.indptr)
-    idf = np.log(1 + (n - df + 0.5) / (df + 0.5))
-    norm = K1 * (1 - B + B * length / max(length.mean(), 1e-9))
-    out = np.zeros((len(queries), n))
-    analyse = vec.build_analyzer()
-    vocab = vec.vocabulary_
-    for i, q in enumerate(queries):
-        for term in set(analyse(q.text)):
-            j = vocab.get(term)
-            if j is None:
-                continue
-            col = tf[:, j]
-            rows, f = col.indices, col.data
-            out[i, rows] += idf[j] * f * (K1 + 1) / (f + norm[rows])
-    return out
+    index = KeywordIndex()
+    index.build(corpus.docs)
+    return np.stack([index.scores(q.text) for q in queries])
 
 
 def embed(corpus: D.Corpus, queries: list[D.Query], results: Path) -> np.ndarray | None:

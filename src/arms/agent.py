@@ -61,6 +61,19 @@ Each turn you see the latest search results. Reply with one JSON object and noth
 
 Stop only when you believe you have found every matching document."""
 
+# With a second tool, the reply also names the kind of search to run.
+SYSTEM_PROMPT_TOOLS = """You are a search agent. Your job is to find ALL documents in a corpus that match a search request. You cannot read the corpus directly. You can only search it, and each search shows documents you have not seen yet.
+
+There are two kinds of search:
+- "semantic" finds documents whose meaning is close to your query.
+- "keyword" finds documents that contain your query's words, ranked by BM25. Use it for exact terms, names, drug or gene names, and phrases.
+
+Each turn you see the latest search results. Reply with one JSON object and nothing else:
+{"thought": "<one short sentence>", "keep": [<numbers of the results that match the request>], "next_search": "<your next search query, or null to stop>", "search_type": "semantic" or "keyword"}
+
+Stop only when you believe you have found every matching document."""
+
+TOOLS = ("semantic", "keyword")
 MAX_REPLY_TOKENS = 256
 
 
@@ -114,6 +127,8 @@ class MockChat:
         done = text.count(" | ") + 1 if "Searches so far: (none)" not in text else 0
         reply = {"thought": "mock", "keep": keep,
                  "next_search": request if done < self.searches else None}
+        if '"keyword"' in messages[0]["content"]:
+            reply["search_type"] = TOOLS[done % 2]
         return ChatReply(json.dumps(reply), len(text) // 4, 20, 0.0)
 
     def chat_many(self, conversations: list[list[dict]], max_tokens: int,
@@ -162,8 +177,9 @@ class RetrievalTool:
     """
 
     def __init__(self, index, docs_by_id: dict, k: int = 10,
-                 snippet_chars: int = 300):
+                 snippet_chars: int = 300, keyword=None):
         self.index = index
+        self.keyword = keyword
         self.docs_by_id = docs_by_id
         self.k = k
         self.snippet_chars = snippet_chars
@@ -172,11 +188,14 @@ class RetrievalTool:
         self.seconds = 0.0
 
     def search(self, query: str, k: int | None = None,
-               exclude: frozenset | set = frozenset()) -> list[dict]:
-        """Top k documents for the query, skipping any id in `exclude`."""
+               exclude: frozenset | set = frozenset(),
+               mode: str = "semantic") -> list[dict]:
+        """Top k documents for the query, skipping any id in `exclude`.
+        mode "keyword" uses the BM25 index when the tool has one."""
         k = k or self.k
         t0 = time.perf_counter()
-        hits = self.index.search(query, k + len(exclude))
+        index = self.keyword if mode == "keyword" and self.keyword is not None else self.index
+        hits = index.search(query, k + len(exclude))
         hits = [h for h in hits if h[0] not in exclude][:k]
         self.seconds += time.perf_counter() - t0
         self.calls += 1
@@ -204,11 +223,15 @@ class SearchAgent:
     """
 
     def __init__(self, client, model: str, max_steps: int = 8,
-                 temperature: float = 0.0):
+                 temperature: float = 0.0, tools: tuple = ("semantic",)):
+        unknown = set(tools) - set(TOOLS)
+        if unknown or not tools:
+            raise ValueError(f"tools must be a subset of {TOOLS}, not {tools}")
         self.client = client
         self.model_name = model
         self.max_steps = max_steps
         self.temperature = temperature
+        self.tools = tuple(tools)
 
     def find(self, query_text: str, tool: RetrievalTool) -> tuple[set[str], dict]:
         """Run one query to completion. See `_steps` for what comes back."""
@@ -241,14 +264,15 @@ class SearchAgent:
                                    agent judges its last results
             parse_failures  int    replies that were not usable JSON
         """
-        system = SYSTEM_PROMPT + (f"\n\nSession {session}." if session else "")
+        prompt = SYSTEM_PROMPT_TOOLS if len(self.tools) > 1 else SYSTEM_PROMPT
+        system = prompt + (f"\n\nSession {session}." if session else "")
         kept: set[str] = set()
         seen: set[str] = set()
         searches: list[str] = []
         results: list[dict] = []
         stats = {"steps": 0, "stopped_early": False, "gen_tokens": 0,
                  "prompt_tokens": 0, "llm_seconds": 0.0, "llm_calls": 0,
-                 "parse_failures": 0}
+                 "parse_failures": 0, "keyword_searches": 0}
 
         while True:
             reply = yield [
@@ -280,9 +304,13 @@ class SearchAgent:
             if stats["steps"] >= self.max_steps:
                 break
 
-            results = tool.search(next_search, exclude=seen)
+            mode = parsed.get("search_type")
+            if mode not in self.tools:
+                mode = self.tools[0]
+            results = tool.search(next_search, exclude=seen, mode=mode)
             seen.update(r["id"] for r in results)
-            searches.append(next_search)
+            searches.append(f"[{mode}] {next_search}" if len(self.tools) > 1 else next_search)
+            stats["keyword_searches"] += mode == "keyword"
             stats["steps"] += 1
             if not results:
                 stats["stopped_early"] = True
@@ -309,10 +337,12 @@ def package(agent: SearchAgent, tool: RetrievalTool, query, matches: set[str],
             "prompt_tokens": float(stats.get("prompt_tokens", 0)),
             "llm_calls": float(stats.get("llm_calls", 0)),
             "parse_failures": float(stats.get("parse_failures", 0)),
+            "keyword_searches": float(stats.get("keyword_searches", 0)),
         },
         extra={
             "model": agent.model_name,
             "max_steps": agent.max_steps,
+            "tools": ",".join(agent.tools),
             "stopped_early": bool(stats.get("stopped_early", False)),
         },
     )

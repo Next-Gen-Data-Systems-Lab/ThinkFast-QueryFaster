@@ -380,6 +380,99 @@ def load_synergy(review: str, max_chars: int = 2000, query: str = "criteria") ->
     )
 
 
+# --------------------------------------------------------------------------
+# arXiv metadata (CC0), for corpora of 10K to 1M documents
+# --------------------------------------------------------------------------
+
+ARXIV_REPO = "librarian-bots/arxiv-metadata-snapshot"
+ARXIV_REVISION = "c428226b689a0e17db2cd55265133b9eca15d97f"
+ARXIV_SAMPLE = 1_000_000
+
+# Category -> request. A paper is in the answer set if the category is any of
+# its own categories, cross-lists included, so every answer set is complete.
+ARXIV_QUERIES = {
+    "quant-ph": "papers about quantum physics: quantum information, quantum computing, entanglement, quantum optics and foundations",
+    "astro-ph.GA": "papers about astrophysics of galaxies: galaxy formation and evolution, the interstellar medium, the Milky Way",
+    "gr-qc": "papers about general relativity and quantum cosmology: black holes, gravitational waves, cosmological models of gravity",
+    "math.AG": "papers about algebraic geometry: varieties, schemes, moduli spaces, sheaves and their cohomology",
+    "math.PR": "papers about probability theory: stochastic processes, random walks, limit theorems, martingales",
+    "cond-mat.supr-con": "papers about superconductivity: superconducting materials, pairing mechanisms, vortices, Josephson effects",
+    "physics.optics": "papers about optics: lasers, photonics, nonlinear optics, optical materials and imaging",
+    "hep-ex": "papers about experimental high energy physics: results and detectors from particle collider and accelerator experiments",
+    "cs.CR": "papers about computer security and cryptography: attacks, defenses, privacy, cryptographic protocols",
+    "cs.RO": "papers about robotics: robot control, motion planning, manipulation, localization and mapping",
+    "stat.ME": "papers about statistical methodology: new estimation, testing and modelling methods for data analysis",
+    "eess.SP": "papers about signal processing: filtering, estimation, communications signals, sensing and audio or radar signals",
+    "cs.LO": "papers about logic in computer science: formal verification, type theory, automata, semantics of programs",
+    "cs.IR": "papers about information retrieval: search engines, ranking, recommender systems, retrieval evaluation",
+    "cs.DB": "papers about databases: query processing and optimization, data management, transactions, data integration",
+    "q-bio.NC": "papers about neurons and cognition: computational neuroscience, neural coding, brain networks, cognitive models",
+    "nlin.CD": "papers about chaotic dynamics: chaos, bifurcations, dynamical systems, turbulence and synchronization",
+    "physics.bio-ph": "papers about biological physics: the physics of proteins, membranes, cells and biological systems",
+    "econ.EM": "papers about econometrics: statistical methods for economic data, causal inference and forecasting in economics",
+    "q-fin.ST": "papers about statistical finance: empirical properties of financial markets, price and volatility statistics",
+}
+
+
+def arxiv_dir() -> "Path":
+    import os
+    from pathlib import Path
+    return Path(os.environ.get("ARXIV_DIR",
+                               Path(__file__).resolve().parent.parent / "data" / "arxiv"))
+
+
+def _arxiv_sample() -> "Path":
+    """The fixed 1M-paper sample: the first 1M arXiv ids ordered by MD5 hash.
+
+    Hashing makes the sample independent of file order and the same on every
+    machine. Built once from the pinned snapshot (2.7 GB of parquet).
+    """
+    import pyarrow as pa
+    import pyarrow.compute as pc
+    import pyarrow.parquet as pq
+    from huggingface_hub import HfApi, hf_hub_download
+
+    out = arxiv_dir() / "arxiv_1m.parquet"
+    if out.exists():
+        return out
+    out.parent.mkdir(parents=True, exist_ok=True)
+    files = sorted(f for f in HfApi().list_repo_files(ARXIV_REPO, repo_type="dataset",
+                                                      revision=ARXIV_REVISION)
+                   if f.startswith("data/") and f.endswith(".parquet"))
+    tables = []
+    for f in files:
+        path = hf_hub_download(ARXIV_REPO, f, repo_type="dataset", revision=ARXIV_REVISION)
+        tables.append(pq.read_table(path, columns=["id", "title", "abstract", "categories"]))
+    # The snapshot repeats a few ids; sample unique ids and keep one row each.
+    ids = sorted({i for t in tables for i in t.column("id").to_pylist()})
+    keep = sorted(ids, key=lambda i: hashlib.md5(i.encode()).hexdigest())[:ARXIV_SAMPLE]
+    # Filter each shard on its own: one 2.7M-row string column overflows Arrow's
+    # 2 GB offsets, while the kept rows fit.
+    keep_arr = pa.array(sorted(keep))
+    kept = pa.concat_tables([t.filter(pc.is_in(t.column("id"), value_set=keep_arr))
+                             for t in tables])
+    df = kept.to_pandas().drop_duplicates("id", keep="first").sort_values("id")
+    pq.write_table(pa.Table.from_pandas(df, preserve_index=False), out)
+    return out
+
+
+def load_arxiv(max_chars: int = 2000) -> Corpus:
+    """1M arXiv papers (title and abstract) and 20 category queries."""
+    import pyarrow.parquet as pq
+
+    t = pq.read_table(_arxiv_sample()).to_pydict()
+    docs, gold = [], {c: set() for c in ARXIV_QUERIES}
+    for pid, title, abstract, cats in zip(t["id"], t["title"], t["abstract"], t["categories"]):
+        did = f"arx_{pid}"
+        docs.append(Doc(did, _clean(f"{title}\n\n{abstract}", max_chars)))
+        for c in cats.split():
+            if c in gold:
+                gold[c].add(did)
+    queries = [Query(f"arx_{c}", text, frozenset(gold[c])) for c, text in ARXIV_QUERIES.items()]
+    return Corpus(name="arxiv", docs=docs, queries=queries,
+                  meta={"max_chars": max_chars, "revision": ARXIV_REVISION})
+
+
 def _synergy_loader(review: str, query: str):
     def loader(max_chars: int = 2000) -> Corpus:
         return load_synergy(review, max_chars=max_chars, query=query)
@@ -391,6 +484,7 @@ LOADERS = {
     "20newsgroups_logic": load_20newsgroups_logic,
     "nfcorpus": load_nfcorpus,
     "synthetic": load_synthetic,
+    "arxiv": load_arxiv,
 }
 for _key in SYNERGY_KEYS:
     LOADERS[f"synergy_{_key}"] = _synergy_loader(_key, "criteria")

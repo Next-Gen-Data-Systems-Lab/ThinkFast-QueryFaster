@@ -20,8 +20,10 @@ rsync -aR --exclude='__pycache__' --exclude='*.pyc' \
     "$HOST:$REMOTE_DIR/"
 # Built data (src.synergy_build). scan.sub transfers data/, so it must exist.
 ssh "$HOST" "mkdir -p '$REMOTE_DIR/data'"
+# data/arxiv is left out: jobs build the arXiv sample from the pinned Hugging
+# Face snapshot, which is faster than shipping a gigabyte with every job.
 if [ -d data ]; then
-    rsync -a data/ "$HOST:$REMOTE_DIR/data/"
+    rsync -a --exclude='arxiv/' data/ "$HOST:$REMOTE_DIR/data/"
 fi
 
 echo "Uploaded to $HOST:$REMOTE_DIR. To submit:"

@@ -62,6 +62,17 @@ endif
 if !defined AGENT_REPLICAS
   AGENT_REPLICAS = 1
 endif
+# semantic, or semantic,keyword to give the agent BM25 search as well.
+# Larger models need more: Qwen2.5-32B weights alone are about 65 GB.
+if !defined MEMORY
+  MEMORY = 48GB
+endif
+if !defined DISK
+  DISK = 80GB
+endif
+if !defined AGENT_TOOLS
+  AGENT_TOOLS = semantic
+endif
 # Regular expression on the device name, e.g. GPU=H200 to keep runs comparable.
 if !defined GPU
   GPU = A100|H200
@@ -77,7 +88,7 @@ should_transfer_files   = YES
 when_to_transfer_output = ON_EXIT_OR_EVICT
 
 executable              = chtc/run.sh
-arguments               = $(DATASET) $(MODEL) $(SIZES) $(BATCHES) $(K) $(TAG) $(ARMS) $(MAX_QUERIES) $(AGENT_STEPS) $(AGENT_CONCURRENCY) $(MAX_CHARS) $(AGENT_REPLICAS)
+arguments               = $(DATASET) $(MODEL) $(SIZES) $(BATCHES) $(K) $(TAG) $(ARMS) $(MAX_QUERIES) $(AGENT_STEPS) $(AGENT_CONCURRENCY) $(MAX_CHARS) $(AGENT_REPLICAS) $(AGENT_TOOLS)
 
 transfer_input_files    = src, data, chtc/run.sh, requirements.txt
 transfer_output_files   = results, figs
@@ -88,8 +99,8 @@ output                  = logs/$(Cluster)_$(Process).out
 
 # ---- resources ----------------------------------------------------------
 request_cpus            = 4
-request_memory          = 48GB
-request_disk            = 80GB
+request_memory          = $(MEMORY)
+request_disk            = $(DISK)
 request_gpus            = 1
 
 # A100 (40/80GB) or H200. A 7B model in bf16 needs ~15GB of weights; the rest

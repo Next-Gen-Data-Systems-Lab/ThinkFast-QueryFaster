@@ -65,13 +65,21 @@ class Query:
         return len(self.sims)
 
 
-def load(dataset: str, n: int, scores_file: str, results: Path = Path("results")) -> list[Query]:
+def load(dataset: str, n: int, scores_file: str, results: Path = Path("results"),
+         arm: str = "classify") -> list[Query]:
+    """Queries in embedding order with their saved scores.
+
+    arm="hybrid" reads rows that scored only each query's top k by embedding,
+    as the large arXiv corpora do. Unscored documents get score -1, so no
+    threshold accepts them; replay is exact for depths up to that k.
+    """
     z = np.load(path_for(results, dataset, n))
     rows = {}
     with open(scores_file) as fh:
         for line in fh:
             r = json.loads(line)
-            if r["arm"] == "classify" and r["corpus_size"] == n:
+            if (r["arm"] == arm and r["corpus_size"] == n
+                    and r.get("dataset", dataset) == dataset):
                 rows[r["query_id"]] = r      # a resumed job repeats a query; keep the last
     doc_ids = z["doc_ids"].tolist()
     row_of = {q: i for i, q in enumerate(z["query_ids"].tolist())}
@@ -79,7 +87,8 @@ def load(dataset: str, n: int, scores_file: str, results: Path = Path("results")
     for qid, r in rows.items():
         sims = z["sims"][row_of[qid]]
         order = np.argsort(-sims, kind="stable")
-        scores = np.array([r["scores"][d] for d in doc_ids])
+        scores = np.array([r["scores"][d] for d in doc_ids] if arm == "classify"
+                          else [r["scores"].get(d, -1.0) for d in doc_ids])
         gold = np.isin(np.array(doc_ids), np.array(r["gold"]))
         out.append(Query(qid, sims[order], scores[order], gold[order]))
     return out

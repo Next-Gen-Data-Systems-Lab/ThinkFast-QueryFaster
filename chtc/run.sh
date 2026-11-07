@@ -59,6 +59,8 @@ AGENT_CONCURRENCY="${10:-none}"
 [[ "$AGENT_CONCURRENCY" == none ]] && AGENT_CONCURRENCY=""
 MAX_CHARS="${11:-2000}"
 AGENT_REPLICAS="${12:-1}"
+# semantic, or semantic,keyword to give the agent BM25 search as well.
+AGENT_TOOLS="${13:-semantic}"
 
 OUT="results/${DATASET}_${TAG}.jsonl"
 echo "=== dataset=$DATASET model=$MODEL sizes=$SIZES batches=$BATCHES k=$K arms=$ARMS ==="
@@ -97,6 +99,7 @@ for BS in "${BATCH_LIST[@]}"; do
         --agent-concurrency "$AGENT_CONCURRENCY" \
         --max-chars "$MAX_CHARS" \
         --agent-replicas "$AGENT_REPLICAS" \
+        --agent-tools "$AGENT_TOOLS" \
         --out "$OUT" \
         --scores-out "$SCORES"
 done

@@ -13,7 +13,7 @@ sets:
 |---|---|---|---|
 | `classify` (the scan) | one yes/no forward pass per (query, document) pair, batched | yes | `O(N)` calls, parallel |
 | `classify` with Kev-9B (`src/kev_scan.py`) | the same scan with an open Jev-like decision model | yes | `O(N)`, one pass per document can answer every query |
-| `agent` | LLM search loop: write a query, get top 10, keep matches, search again or stop | no | serial in steps |
+| `agent` | LLM search loop: write a query, get the top 20 unseen documents, keep matches, search again or stop. `--agent-tools semantic,keyword` adds BM25 search as a second tool | no | serial in steps |
 | `agent`, batched (`--agent-concurrency`) | the same agent, many queries in flight on one GPU | no | cheaper per step, slower per query |
 | `ann` | top-k by embedding similarity, no LLM | no | `O(log N)`, no model calls |
 | `hybrid` | top-k by embedding, then classify those k | no (yes at k = N) | `O(k)` calls |
@@ -52,6 +52,13 @@ Precision is similar for both, 0.68-0.76.
   as the scan reaches recall 0.78 at t = 0.5 on 20 Newsgroups (Qwen 0.31) and
   F1 0.64 (Qwen 0.42). Packing all 20 queries into one pass per document scores
   540 documents per second per query. See [Kev-9B as the scan](#kev-9b-as-the-scan).
+- **Scale (arXiv, 10K to 1M papers):** the agent's effort barely grows with the
+  corpus (7 to 12 steps, 143 to 239 papers read, always stopping by choice)
+  while answer sets grow a hundredfold, so its recall falls from 0.19 to 0.008.
+  At equal time and with a held-out threshold, the scan finds 89 / 384 / 646
+  relevant papers per query against the agent's 22 / 44 / 68, better on 20 of
+  20 queries at every size. At t = 0.5 the two tie at 10K. See the arXiv item
+  under [Before the final report](#before-the-final-report-dec-7).
 
 **Next:** rehearse the midterm talk (around Nov 10), then work through the plan
 under [Next steps](#next-steps) for the final report (due Dec 7).
@@ -317,14 +324,16 @@ it stopped.
 | `nfcorpus` | ~3.6K | ~320 | ~38 | Real IR relevance judgments. Needs `datasets`. Second dataset, for generality. |
 | `20newsgroups_logic` | ~18.8K | 25 | 18-1,046 | Keyword, AND, OR and NOT queries on the same documents; gold from labels and exact word matches. |
 | `synergy_<review>` | 257-48K | 1 each | 9-762 | **Main benchmark for the short paper.** 26 systematic reviews ([SYNERGY](https://github.com/asreview/synergy-dataset), CC0). Each is its own corpus: the review's screened candidate pool, with its inclusions as the complete answer set and its eligibility criteria as the query (`_title` variants use only the review title). `synergy` means all 26. |
+| `arxiv` | 1M | 20 | 15-581 at 10K, 1.4K-59K at 1M | **Scale.** A fixed 1M-paper sample (first 1M unique ids by MD5) of the CC0 arXiv metadata snapshot `librarian-bots/arxiv-metadata-snapshot` at a pinned revision; title and abstract. 20 category queries; a paper is relevant if the category is among its own (cross-lists included), so answer sets are complete. Built on first use into `data/arxiv/` (32 s locally, from 2.7 GB of parquet); jobs build their own copy. |
 | `synthetic` | any | 5 | N/5 | Offline smoke tests only. Never reported. |
 
 SYNERGY is built locally, because it needs network access:
-`python -m src.synergy_build` reads the labels at a pinned commit, fetches titles
-and abstracts from OpenAlex, fills missing abstracts from PubMed where a record
-has a PMID, and writes `data/synergy/` (not in git; `chtc/upload.sh` copies it).
-About 30% of records stay title-only, close to the official build; screeners see
-those records too. Pools are never merged, since a record in one review's pool
+`python -m src.synergy_build` reads the labels at a pinned commit, takes title
+and abstract from PubMed where a record has a PMID and from OpenAlex otherwise
+(and OpenAlex abstracts where PubMed has none), and writes `data/synergy/` (not
+in git; `chtc/upload.sh` copies it). OpenAlex needs a free API key in
+`OPENALEX_API_KEY`, read from the environment or the project's `.env`. 8.7% of
+records stay title-only; screeners see those records too. Pools are never merged, since a record in one review's pool
 was never screened against another review's criteria. Records are shuffled with
 a fixed seed, because the source files list inclusions first.
 
@@ -476,31 +485,106 @@ The two contributions are adaptive k and the exchange rate.
 
 - [x] Kev-9B scan on 20 Newsgroups (1K, 5K, 10K), NFCorpus and the logic queries,
       one query at a time and packed (`chtc/kev.sub`, `src.kev_compare`)
-- [ ] JEV-9B scan on the same settings (Apache-2.0, pinned revision 7ac669b).
-      Pilot done: N = 1K F1 0.61 at t = 0.5 (Qwen 0.40, Kev 0.63), 81 decisions/s,
-      which is close to compute-bound for a 9B prefill (Kev reaches 540 only by
-      packing queries). Sweep running as jobs 12437151-53.
-      Compare with `python -m src.kev_compare --model jev`.
+- [x] JEV-9B scan on the same settings (Apache-2.0, pinned revision 7ac669b),
+      `python -m src.kev_compare --model jev`. F1 at t = 0.5 / tuned:
+      20NG 10K 0.64 / 0.63 (Qwen 0.42 / 0.58, Kev 0.64 / 0.65); logic 10K
+      0.79 / 0.79 (Qwen 0.56 / 0.58, Kev 0.70 / 0.77); NFCorpus 0.20 / 0.20 (Qwen
+      0.12 / 0.12, Kev 0.15 / 0.18). NOT queries F1 0.63 against Qwen's 0.18. Tuned
+      threshold 0.3-0.5 everywhere. Recall in the agent's time at 20NG 10K: 0.43
+      (Qwen 0.26, Kev 0.48 separate). 73-127 decisions/s, close to compute-bound
+      for a 9B prefill. ECE 0.045-0.056; well calibrated on logic (0.83 predicted,
+      0.82 actual).
+- [ ] Cheap baselines (`src/baselines.py`, `src/rerank_scan.py`), tuned F1 with
+      the cutoff chosen on other queries, and WSS@95:
 
-### Short paper (decided Nov 7)
+      | Setting | BM25 | Embed | bge | Qwen | Kev | JEV |
+      |---|---:|---:|---:|---:|---:|---:|
+      | 20NG 10K | 0.37 | 0.48 | 0.35 | 0.58 | 0.65 | 0.63 |
+      | Logic 10K | 0.32 | 0.31 | 0.23 | 0.58 | 0.77 | 0.79 |
+      | NFCorpus | 0.16 | 0.12 | 0.13 | 0.12 | 0.18 | 0.20 |
+      | SYNERGY | 0.11 | 0.15 | | | | |
 
-Target a 4-page short paper. Reviewers will ask why an LLM is needed, whether
-the agent is a strawman, and whether 10K documents is enough.
+      WSS@95 at 20NG 10K: 0.04 / 0.41 / 0.25 / 0.55 / 0.74 / 0.60. The bge
+      cross-encoder (1,100 decisions/s, 9x Qwen) never beats embeddings; zero-shot
+      Qwen only ties BM25 on NFCorpus, but both decision models beat it. MiniLM
+      jobs running; SYNERGY LLM and reranker scans queued.
+- [x] SYNERGY as the main benchmark (`python -m src.synergy_compare`). Built:
+      168,946 records, 2,831 inclusions (official: 169,288 and 2,834); 8.7%
+      title-only. Over the 26 reviews:
 
-- [ ] Cheap baselines (`src/baselines.py`, `src/rerank_scan.py`). Offline so far,
-      with tuned cutoffs: BM25 F1 0.37 and embeddings 0.48 against Qwen 0.58 and
-      Kev 0.65 at 20NG 10K; WSS@95 0.04 / 0.41 / 0.55 / 0.74. On the logic queries
-      BM25 and embeddings reach 0.31-0.32 against 0.58 and 0.77. On NFCorpus BM25
-      ties Qwen (0.16 against 0.12, CI crosses 0) and Kev is best (0.18).
-      Cross-encoders (bge-reranker-v2-m3, ms-marco-MiniLM) running as jobs
-      12437161-66 (`chtc/scan.sub`).
-- [ ] SYNERGY as the main benchmark: loader done, data build running. Then
-      embeddings, Qwen scan and agent, Kev, JEV and rerankers on all 26 reviews.
-- [ ] A stronger agent: keyword search as a second tool, and a larger model.
-- [ ] arXiv metadata (CC0) at 100K and 1M documents, for the crossover at scale.
-- [ ] Rewrite `report/` as the 4-page paper.
-- [ ] Final report: draft in `report/report.tex` (LaTeX, compile on Overleaf),
-      complete except the JEV-9B results. The story changes: low recall was
+      | Scorer | AP | F1 tuned | WSS@95 | docs/s |
+      |---|---:|---:|---:|---:|
+      | BM25 | 0.10 | 0.11 | 0.23 | |
+      | Embeddings | 0.16 | 0.15 | 0.45 | |
+      | MiniLM / bge | 0.14 / 0.10 | 0.13 / 0.10 | 0.34 / 0.26 | |
+      | Qwen 7B scan | 0.36 | **0.32** | **0.58** | 109 |
+      | Kev-9B | **0.38** | 0.22 | 0.55 | 58 |
+      | JEV-9B | 0.34 | 0.25 | 0.38 | 46 |
+
+      On long, multi-condition criteria zero-shot Qwen ranks as well as the
+      decision models and has the best tuned F1 (Kev - Qwen -0.10 [-0.17, -0.05],
+      JEV - Qwen -0.08 [-0.16, -0.01]). Kev at t = 0.5 keeps recall 0.69 at
+      precision 0.17. The agent (7B, embeddings) reaches recall 0.16 in 5.3 s, 11
+      steps. In the agent's own time per review, the scan in embedding order reaches
+      0.26 with Qwen (+0.10 [0.05, 0.16], 17/26 reviews), 0.37 with Kev (+0.21,
+      22/26) and 0.21 with JEV (+0.05 [0.004, 0.09], 16/26). Exchange rate 48 (Qwen),
+      lower than 20NG's 78 because the criteria make prompts longer.
+- [x] A stronger agent (`python -m src.agents_compare`, `python -m
+      src.synergy_compare`): BM25 keyword search as a second tool
+      (`--agent-tools semantic,keyword`, `src/arms/keyword.py`, shared with the
+      BM25 baseline) and Qwen2.5-32B, agent only, up to 64 steps. Agent recall,
+      and scan recall in each agent's own seconds per query (t = 0.5):
+
+      | Agent | 20NG 10K agent | Qwen | Kev | JEV | SYNERGY agent | Qwen | Kev | JEV |
+      |---|---:|---:|---:|---:|---:|---:|---:|---:|
+      | 7B, embeddings | 0.09 | 0.22 | 0.43 | 0.38 | 0.16 | 0.26 | 0.37 | 0.21 |
+      | 7B, + BM25 | 0.10 | 0.24 | 0.49 | 0.41 | 0.13 | 0.29 | 0.46 | 0.28 |
+      | 32B, embeddings | 0.17 | 0.29 | 0.68 | 0.57 | 0.21 | 0.32 | 0.62 | 0.40 |
+      | 32B, + BM25 | 0.13 | 0.29 | 0.63 | 0.54 | 0.16 | 0.31 | 0.55 | 0.34 |
+
+      Every scan beats every agent on both datasets; all intervals are above
+      zero. 32B with embeddings is the best agent, but its steps cost about 1.4 s
+      (exchange rate about 160 against the Qwen scan), so the scan's margin grows.
+      Adding BM25 lowers recall for both models: the agents switch to keyword
+      search (55-90% of searches on SYNERGY) and find less. This table gives
+      each query its own agent time; the older crossover used the mean, which
+      gives slightly higher scan recall (0.26 against 0.22 for Qwen) because
+      recall is concave in k. Use the per-query numbers in the paper.
+- [x] arXiv at 10K, 100K and 1M documents (job 12437254, TAG scale, 2.4 h on
+      an H200): hybrid with k = 20,000 (each query's top 20K by embedding is
+      classified) and the 7B agent. `python -m src.scale_compare` replays it from
+      the local rankings (`src.embed_ranks`; the 1M ranking took 1 h 55 min on the
+      Mac). Fingerprints match the job's rows, the job scored all of the local
+      top 20K, and no equal-time budget went past 20K, so the replay is exact.
+      Held-out threshold: tuned on 10K leaving each query out (10^-8, as on 20
+      Newsgroups), then used at every size.
+
+      | | 10K | 100K | 1M |
+      |---|---:|---:|---:|
+      | Median answer set | 148 | 1,436 | 14,222 |
+      | Agent steps / papers read / seconds | 7.2 / 143 / 3.9 | 10.6 / 212 / 6.2 | 11.9 / 239 / 8.2 |
+      | Agent recall / found | 0.19 / 22 | 0.05 / 44 | 0.008 / 68 |
+      | Scan depth in agent's time | 540 | 889 | 1,172 |
+      | Scan recall t=0.5 | 0.16 | 0.09 | 0.024 |
+      | Scan recall held-out / found | 0.57 / 89 | 0.29 / 384 | 0.069 / 646 |
+      | Scan - agent, held-out [95% CI] | +0.38 [0.31, 0.44] | +0.24 [0.20, 0.29] | +0.061 [0.036, 0.091] |
+      | Scan - agent, t=0.5 | -0.04 [-0.10, 0.03] | +0.04 [0.02, 0.06] | +0.015 [0.011, 0.020] |
+      | Top 20K, held-out: recall | 0.63 | 0.60 | 0.44 |
+
+      Qwen scans arXiv abstracts at about 140 documents per second, so a full
+      1M scan would take 117 minutes per query; the top 20K takes 140 s. The
+      exchange rate is 66-81 at every size. The embedding's top 20K holds 59% of
+      each answer set at 1M, which caps the hybrid. Only the 7B agent and the
+      Qwen scan were run here.
+- [ ] Short paper: draft in `paper/paper.tex` (ACM sigconf, about 2,000 words,
+      `refs.bib`, figure from `python -m src.paper_figs`). Paused (Nov 7) to
+      focus on experiments and the report; the arXiv results still need to go
+      in. `paper_figs` now draws an arXiv 1M panel automatically, and at t = 0.5
+      its recalls are near zero, so choose N and threshold before using it. `report/` stays
+      the longer course report and still needs the new results.
+- [ ] Final report: draft in `report/report.tex` (LaTeX, compile on Overleaf).
+      All results are in, including JEV-9B, SYNERGY and arXiv scale (Table
+      `tab:scale`); no TODOs left. Not yet compiled. The story changes: low recall was
       mostly a Qwen problem, so the scan-against-agent result gets stronger with
       a real decision model, and the threshold finding becomes a zero-shot caveat.
 

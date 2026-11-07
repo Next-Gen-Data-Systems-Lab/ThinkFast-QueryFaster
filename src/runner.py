@@ -37,6 +37,7 @@ from . import metrics as M
 from .arms import agent as AG
 from .arms import ann as ANN
 from .arms import classify as CLS
+from .arms import keyword as KW
 
 # Every request is prefill only (max_tokens=1), so vLLM's per-step token budget
 # caps the real batch, not max_num_seqs. Its 2048-token default fits about 7 of
@@ -117,6 +118,8 @@ def main(argv=None):
                    help="vLLM max_num_seqs values; the throughput sweep")
     p.add_argument("--k", type=int, default=100,
                    help="candidates for the ann and hybrid arms")
+    p.add_argument("--agent-tools", default="semantic",
+                   help="semantic, or semantic,keyword to add BM25 search")
     p.add_argument("--agent-k", type=int, default=20,
                    help="documents the agent sees per search")
     p.add_argument("--agent-max-steps", type=int, default=8,
@@ -227,9 +230,17 @@ def main(argv=None):
 
                 agent = tool = None
                 if "agent" in arms:
+                    tools = tuple(x.strip() for x in args.agent_tools.split(",") if x.strip())
                     agent = AG.SearchAgent(AG.build_chat(model), args.model,
-                                           max_steps=args.agent_max_steps)
-                    tool = AG.RetrievalTool(index, docs_by_id, k=args.agent_k)
+                                           max_steps=args.agent_max_steps, tools=tools)
+                    keyword = None
+                    if "keyword" in tools:
+                        keyword = KW.KeywordIndex()
+                        kw_s = keyword.build(sub.docs)
+                        print(f"[runner] n={len(sub.docs)} keyword index built in "
+                              f"{kw_s:.1f}s", flush=True)
+                    tool = AG.RetrievalTool(index, docs_by_id, k=args.agent_k,
+                                            keyword=keyword)
 
                 for arm in arms:
                     if arm == "agent" and concurrency:
@@ -244,7 +255,8 @@ def main(argv=None):
                                 continue
                             rs, batch = AG.run_many(
                                 agent, lambda: AG.RetrievalTool(
-                                    index, docs_by_id, k=args.agent_k), todo, c)
+                                    index, docs_by_id, k=args.agent_k,
+                                    keyword=keyword), todo, c)
                             calls = sum(r.counts["llm_calls"] for r in rs)
                             for r in rs:
                                 row = {**base, "k": None, "agent_concurrency": c,

@@ -31,7 +31,9 @@ Keep this file and `README.md` updated with progress as work happens.
   list truncation literature first. Done: the test came back negative, so report
   it as a negative result with the oracle bound. The strongest finding is the
   scan in embedding order beating the agent at equal time, one query at a time.
-  Batched agents only tie it, at the agent's low recall.
+  Batched agents only tie it, at the agent's low recall. On arXiv up to 1M the
+  agent reads about 200 papers whatever N is, so the scan's lead in papers found
+  grows with N (done Nov 7; report Table `tab:scale`).
 
 ## Running on CHTC
 
@@ -45,7 +47,9 @@ condor_submit BATCHES=32 TAG=name GPU='H200$' LENGTH=short chtc/midterm.sub
 ```
 
 Submit-time options: `DATASET MODEL SIZES BATCHES K TAG ARMS MAX_QUERIES
-AGENT_STEPS AGENT_CONCURRENCY AGENT_REPLICAS MAX_CHARS GPU LENGTH`.
+AGENT_STEPS AGENT_CONCURRENCY AGENT_REPLICAS AGENT_TOOLS MAX_CHARS GPU LENGTH
+MEMORY DISK`. Qwen2.5-32B needs `DISK=200GB MEMORY=96GB`. The default `GPU` is
+`A100|H200`, so pass `GPU='H200$'` for timings comparable with other runs.
 
 ## Things that have broken before
 
@@ -71,6 +75,10 @@ AGENT_STEPS AGENT_CONCURRENCY AGENT_REPLICAS MAX_CHARS GPU LENGTH`.
 - **SYNERGY data:** build it locally with `python -m src.synergy_build` (needs
   network), then `chtc/upload.sh` copies `data/`. Datasets accept comma lists and
   `synergy` for all 26; a size above the pool size means the whole pool.
+- **arXiv at 1M:** a full LLM scan is about 117 minutes per query, so jobs
+  classify each query's top 20K by embedding (`ARMS=hybrid K=20000`) and replay
+  equal-time plans from those scores (`python -m src.scale_compare`). `upload.sh`
+  leaves `data/arxiv` out.
 - **Token budget:** `max_num_batched_tokens` defaults to 2048, which limits
   prefill-only work. The runner sets batch size x 512. Don't size it from
   `max_model_len`: at batch size 256 that means profiling a 524K-token step.
@@ -99,7 +107,8 @@ AGENT_STEPS AGENT_CONCURRENCY AGENT_REPLICAS MAX_CHARS GPU LENGTH`.
 
 ## Progress
 
-The final report is `report/report.tex` with `refs.bib` and `figs/`, compiled on
+The short paper is `paper/paper.tex` (ACM sigconf; figure from
+`python -m src.paper_figs`). The final report is `report/report.tex` with `refs.bib` and `figs/`, compiled on
 Overleaf (no LaTeX on this Mac or on CHTC). Keep its numbers in step with README.
 
 Results and status are in the Status section of `README.md`. The midterm deck is
