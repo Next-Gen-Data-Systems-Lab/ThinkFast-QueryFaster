@@ -6,18 +6,28 @@ Proposal document: https://www.overleaf.com/project/6ac8329001f35b6ac41611bb
 better to classify every document in parallel than to let an LLM agent search
 iteratively?
 
-Four execution arms behind one interface:
+The arms, all behind one interface and scored against the same complete answer
+sets:
 
-| Arm | What it does | Cost shape | 
-|---|---|---|
-| `agent` | iterative LLM search, reason → search → inspect → repeat | serial in steps |
-| `classify` | one forward pass per (query, document) pair, batched | `O(N)` calls, parallel |
-| `ann` | embed the corpus, retrieve top-k by similarity | `O(log N)`, no model calls |
-| `hybrid` | ANN for candidates, then classify those k | `O(k)` calls |
+| Arm | What it does | Reads every document? | Cost shape |
+|---|---|---|---|
+| `classify` (the scan) | one yes/no forward pass per (query, document) pair, batched | yes | `O(N)` calls, parallel |
+| `classify` with Kev-9B (`src/kev_scan.py`) | the same scan with an open Jev-like decision model | yes | `O(N)`, one pass per document can answer every query |
+| `agent` | LLM search loop: write a query, get top 10, keep matches, search again or stop | no | serial in steps |
+| `agent`, batched (`--agent-concurrency`) | the same agent, many queries in flight on one GPU | no | cheaper per step, slower per query |
+| `ann` | top-k by embedding similarity, no LLM | no | `O(log N)`, no model calls |
+| `hybrid` | top-k by embedding, then classify those k | no (yes at k = N) | `O(k)` calls |
+
+Only the scan is exhaustive. The other arms are not meant to be: they are
+cheaper, and they pay for it in recall, because recall is always measured
+against every matching document. Comparisons between arms are made at equal
+cost (time or decisions), never at equal effort. `hybrid` with k = N is the
+scan in embedding order, so cutting it at k is "stop after k documents". The
+adaptive k work tested rules for choosing that stopping point per query.
 
 ## Status
 
-*Last updated Nov 6, 2026. Measured on one H200 with Qwen2.5-7B.*
+*Last updated Nov 7, 2026. Measured on one H200 with Qwen2.5-7B, plus Kev-9B as a second scan.*
 
 All four arms run on CHTC, including a measured search agent. Results are in
 `results/`, and `python -m src.summarize_runs results` prints the numbers.
@@ -38,6 +48,10 @@ Precision is similar for both, 0.68-0.76.
   time at 170 documents per second), falling to about 11 when calls are batched.
 - **Limits:** the scan's lead mostly disappears on NFCorpus, where hybrid has the
   best F1. Qwen 1.5B scans about 2.4x faster but ranks much worse.
+- **A purpose-built classifier fixes most of the scan's recall problem.** Kev-9B
+  as the scan reaches recall 0.78 at t = 0.5 on 20 Newsgroups (Qwen 0.31) and
+  F1 0.64 (Qwen 0.42). Packing all 20 queries into one pass per document scores
+  540 documents per second per query. See [Kev-9B as the scan](#kev-9b-as-the-scan).
 
 **Next:** rehearse the midterm talk (around Nov 10), then work through the plan
 under [Next steps](#next-steps) for the final report (due Dec 7).
@@ -141,6 +155,63 @@ it. All numbers are 20 Newsgroups with Qwen2.5-7B unless stated.
   second and inserts take 0.11 ms per document. Search keeps at least 99.9% of the
   exact top k up to k = 3,000 when `ef` is at least k. Embedding is the real cost
   (6.3 s on the H200), so HNSW changes nothing at this scale.
+
+### Kev-9B as the scan
+
+Kev-9B is an open, Jev-like decision model (a LoRA and pointer head on
+Qwen3.5-9B-Base, Apache-2.0). It reads the document first and the questions after
+it, so one pass over a document can answer every query ("packed"). It ran on the
+same documents as Qwen (fingerprints match) on one H200, through
+`src/kev_scan.py`. `python -m src.kev_compare` replays both from saved scores and
+writes `results/kev_compare.json`. Differences are Kev minus Qwen, with a
+bootstrap 95% interval over queries.
+
+| Setting | Qwen F1 at 0.5 | Kev F1 at 0.5 | Qwen F1, held-out t | Kev F1, held-out t | Held-out difference |
+|---|---:|---:|---:|---:|---:|
+| 20NG N = 1K | 0.40 | 0.63 | 0.56 | 0.63 | +0.07 [0.04, 0.10] |
+| 20NG N = 5K | 0.41 | 0.64 | 0.58 | 0.65 | +0.07 [0.04, 0.10] |
+| 20NG N = 10K | 0.42 | 0.64 | 0.58 | 0.65 | +0.07 [0.04, 0.11] |
+| NFCorpus | 0.12 | 0.15 | 0.12 | 0.18 | +0.06 [0.02, 0.10] |
+| Logic N = 1K | 0.59 | 0.73 | 0.57 | 0.76 | +0.19 [0.12, 0.25] |
+| Logic N = 10K | 0.56 | 0.70 | 0.58 | 0.77 | +0.19 [0.15, 0.23] |
+
+- **Recall without threshold tuning.** At t = 0.5, Kev's recall is 0.78 at N = 10K
+  against Qwen's 0.31. Qwen needs t = 1e-8 to reach 0.63. Kev's held-out threshold
+  is 0.5 to 0.9 in every setting, so the threshold problem is mostly a Qwen problem.
+- **Query shape stops mattering much.** At N = 10K and t = 0.5, Kev's F1 is 0.74
+  (keyword), 0.54 (AND), 0.79 (OR), 0.70 (NOT). Qwen's is 0.73, 0.63, 0.45, 0.18.
+  NOT goes from recall 0.10 to 0.78. Kev is weaker than Qwen only on AND at 0.5,
+  where it accepts too much (precision 0.40); with a held-out threshold it wins
+  there too (0.78 against 0.58).
+- **Equal time against the agent (20NG, t = 0.5).** Given the agent's own seconds
+  per query, the scan in embedding order reaches:
+
+  | N | Agent | Qwen scan | Kev, one query at a time | Kev, packed |
+  |---:|---:|---:|---:|---:|
+  | 1,000 | 0.23 | 0.28 | 0.68 | 0.77 (whole corpus) |
+  | 5,000 | 0.14 | 0.28 | 0.59 | 0.75 |
+  | 10,000 | 0.09 | 0.26 | 0.48 | 0.71 |
+
+  Kev beats the agent on all 20 queries at every size. One query at a time Kev
+  scores 121 documents per second, slower than Qwen's 170, and wins on accuracy.
+  Packed is 540 documents per second per query, but only when the queries arrive
+  together, so it fits batch workloads, not one-off questions.
+- **Exchange rate with Kev:** one Qwen agent step (0.46 s) buys about 56 Kev
+  decisions one query at a time, or about 250 packed.
+- **Hybrid improves too.** Classifying the top 1,000 by embedding at N = 10K gives
+  recall 0.57 with Kev against 0.27 with Qwen.
+- **NFCorpus is still hard.** Kev is the best arm there (held-out F1 0.18, against
+  0.15 for Qwen's hybrid and 0.12 for the agent), but recall does not improve
+  (0.19 for both at the held-out threshold). With 50 queries it packs 724
+  documents per second per query.
+- **Kev is not better calibrated.** Its expected calibration error is 0.06,
+  against 0.04 for Qwen. Above 0.5 it predicts 0.81 on average and is right
+  about half the time. Qwen is extreme in the other direction: almost everything
+  is near 0 or 1.
+- **Caveats:** Kev is a different, larger base model trained for decisions, so
+  this is not the same-model comparison the agent arm has. Neither 20 Newsgroups
+  nor NFCorpus is in its training data. Packed throughput depends on how many
+  queries share a pass: 20 here, 50 on NFCorpus, 25 on the logic set.
 
 Related work to cite: ranked list truncation (Choppy, AttnCut, and Meng et al.
 2024 for LLM re-ranking), adaptive-k for RAG (Taguchi et al. 2025), stopping rules
@@ -256,9 +327,9 @@ the measurement meaningless.
 Rather than depending on one vendor checkpoint, we implement the System One
 decision pattern directly on an open-weights model: the prompt ends where the
 answer begins, we generate **exactly one token**, and we read the probability
-mass on "yes" versus "no" from the LM head. One forward pass per pair, no
-autoregressive generation, and a calibrated probability rather than a parsed
-string.
+mass on "yes" versus "no" from the LM head. One forward pass per pair and no
+autoregressive generation. Nothing is trained, and the output is a probability
+rather than a parsed string, though it is not calibrated.
 
 Three reasons this beats chasing a checkpoint in a five-day window:
 
@@ -268,9 +339,8 @@ Three reasons this beats chasing a checkpoint in a five-day window:
    batch throughput.
 3. No gated downloads, no custom serving stack.
 
-A purpose-built decision model (Laya, JEV-9B, NeoHorse-Jev-4B) swaps in behind
-the same interface later, to confirm the finding is architectural rather than
-specific to one model.
+A purpose-built decision model (Kev, JEV-9B) needs its own environment, so it runs
+through `src/kev_scan.py` and `chtc/run_kev.sh`, and writes the same score files.
 
 `--batch-sizes` sets vLLM's `max_num_seqs`, which caps concurrent sequences and
 is therefore the effective batch size. It is the **outer** loop in the runner,
@@ -318,6 +388,8 @@ src/
   access_paths.py  fixed k, adaptive k, oracle, threshold calibration, transfer
   crossover.py     performance model, equal-time comparison, exchange rates
   report_figs.py   final report figures
+  kev_scan.py      scan with Kev, in its own environment on CHTC
+  kev_compare.py   Kev against Qwen from saved scores, and against the agent at equal time
   index_costs.py   HNSW build, insert and deep-k recall (needs hnswlib)
   arms/
     classify.py    Approach B  (+ MockDecisionModel for offline tests)
@@ -326,6 +398,7 @@ src/
 chtc/
   midterm.sub      HTCondor submit file
   run.sh           job executable (runs smoke test first)
+  run_kev.sh, kev.sub   the Kev job, pinned to one Kev commit
   upload.sh        copies the project to the access point
 ```
 
@@ -385,7 +458,12 @@ Done so far:
 
 The two contributions are adaptive k and the exchange rate.
 
-- [ ] Write the final report
+- [x] Kev-9B scan on 20 Newsgroups (1K, 5K, 10K), NFCorpus and the logic queries,
+      one query at a time and packed (`chtc/kev.sub`, `src.kev_compare`)
+- [ ] Decide whether JEV-9B adds anything over Kev (its license is not yet confirmed)
+- [ ] Write the final report. The story changes: low recall was mostly a Qwen
+      problem, so the scan-against-agent result gets stronger with a real
+      decision model, and the threshold finding becomes a zero-shot caveat.
 
 ### Future work
 
@@ -393,7 +471,8 @@ Not planned before Dec 7:
 
 - Query rewriting: an expensive model decomposes the predicate once and a cheap
   model executes it N times
-- Laya and Kev behind the same interface
+- Laya, skipped: 512-token limit, reportedly near random zero-shot
+- Hosted Jev: closed, so accuracy only, and billed per call
 - Update rate
 
 We are skipping the confidence cascade because it is too close to JEVDB.

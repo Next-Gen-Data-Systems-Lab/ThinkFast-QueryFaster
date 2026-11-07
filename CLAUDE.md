@@ -16,7 +16,10 @@ Keep this file and `README.md` updated with progress as work happens.
   answer set is complete. Second dataset: NFCorpus, 50 queries.
 - Main model: Qwen2.5-7B-Instruct for both classifier and agent, so the
   comparison isolates architecture. Second model: Qwen2.5-1.5B.
-- Laya and Kev are future work.
+- Kev-9B runs as a second scan arm alongside Qwen, not instead of it. Done on
+  all datasets: it fixes most of the scan's recall and threshold problems, so the
+  report treats low recall as a zero-shot Qwen limit. JEV-9B only if it adds
+  something. Laya is skipped.
 - Contribution before Dec 7: the exchange rate (one agent step buys N
   classification decisions) and adaptive k. Query rewriting is future work. Skip
   the confidence cascade, which is too close to JEVDB.
@@ -58,6 +61,9 @@ AGENT_STEPS AGENT_CONCURRENCY AGENT_REPLICAS MAX_CHARS GPU LENGTH`.
   ssh exit code, or a dead connection looks like finished jobs.
 - **Sliding window:** vLLM refuses prefix caching for models that declare one, such
   as Phi-3.5. `classify.py` passes `disable_sliding_window=True`.
+- **`getpwuid(): uid not found`:** the container has no user for HTCondor's uid,
+  which kills torch inductor. `run_kev.sh` sets `USER`, `LOGNAME` and the
+  inductor and Triton cache dirs.
 - **Token budget:** `max_num_batched_tokens` defaults to 2048, which limits
   prefill-only work. The runner sets batch size x 512. Don't size it from
   `max_model_len`: at batch size 256 that means profiling a 524K-token step.
@@ -71,6 +77,10 @@ AGENT_STEPS AGENT_CONCURRENCY AGENT_REPLICAS MAX_CHARS GPU LENGTH`.
 - Hybrid plans replay offline: `src.embed_ranks` saves the ranking (needs
   sentence-transformers), then `src.access_paths` and `src.crossover` use the
   saved scores. Compare rules with fixed k at equal mean cost, never by eye.
+- Kev job: `condor_submit GPU='H200$' TAG=kev9b DATASET=... SIZES=... chtc/kev.sub`
+  (also `MODES MAX_QUERIES LENGTH`). `python -m src.kev_compare` compares offline.
+- `src/kev_scan.py` runs only in Kev's environment through `chtc/run_kev.sh`, pinned
+  to a commit whose code was read. Kev's code has not been run on this Mac.
 - `SearchAgent._steps` is a generator, so `find` and `run_many` share one loop.
   A batched row's `wall_s` is latency; cost is `batch_wall_s` over calls.
 - The local test command is in the README quick start. There is no system

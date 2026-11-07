@@ -6,12 +6,13 @@ Rather than depending on one vendor checkpoint, we implement the System One
 decision pattern directly on top of an open-weights model: the prompt ends
 where the answer begins, we generate exactly ONE token, and we read the
 probability mass on "yes" versus "no" from the LM head. No autoregressive
-generation, one forward pass per (query, document) pair, and a calibrated
-probability rather than a parsed string.
+generation, and one forward pass per (query, document) pair. The result is a
+probability rather than a parsed string, but it is not calibrated: 97% of scores
+fall below 0.001, and the best cutoff runs from 0.5 to 1e-8 by query shape.
 
-This is the same mechanism the open Jev reproductions use (score single-token
-labels with the model's own head, assemble the typed answer in code). It buys
-us three things a purpose-built checkpoint would not:
+This is simpler than the open Jev-like models, which train an adapter or a small
+block on a frozen base. Here nothing is trained. It buys us three things a
+purpose-built checkpoint would not:
 
   1. The same served model backs the agent arm, so the comparison isolates
      execution architecture rather than confounding it with model quality.
@@ -19,8 +20,8 @@ us three things a purpose-built checkpoint would not:
      the thesis is about batch throughput.
   3. No gated downloads or custom serving stacks in a five-day window.
 
-A purpose-built decision model (Laya, JEV-9B, NeoHorse-Jev-4B) can be swapped
-in later behind the same interface to check the finding is architectural.
+A purpose-built decision model (Kev, JEV-9B) needs its own environment, so it
+runs through src/kev_scan.py and writes the same score files.
 """
 
 from __future__ import annotations
