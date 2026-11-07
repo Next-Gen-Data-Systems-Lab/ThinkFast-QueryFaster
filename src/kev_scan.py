@@ -10,7 +10,7 @@ Runs in-process, with no HTTP, and reads raw probabilities: the API rounds to
 four decimals, which would erase the low-threshold analysis. Rows and scores use
 the same format as src.runner, so src.access_paths works on them unchanged.
 
-Needs Kev's own environment (Python 3.12+), so it runs through chtc/run_kev.sh.
+Needs Kev's own environment (Python 3.12+), so it runs through chtc/run_kev_scan.sh.
 
 Usage: python -m src.kev_scan --run jaredpalmer/kev-9b@v1.0 --corpus-sizes 1000 --tag kev9b
 """

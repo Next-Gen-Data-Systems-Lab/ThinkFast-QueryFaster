@@ -1,6 +1,6 @@
 """Turn results JSONL into the figures and tables for the report.
 
-    python -m src.analyze --results results/midterm.jsonl --outdir figs
+    python -m src.analyze --results results/20newsgroups_sweep_bs32.jsonl --outdir figs
 
 Produces a markdown summary (paste into the report) and four figures:
 
@@ -221,7 +221,7 @@ def markdown(df: pd.DataFrame) -> str:
 
 def main(argv=None):
     p = argparse.ArgumentParser()
-    p.add_argument("--results", default="results/midterm.jsonl")
+    p.add_argument("--results", default="results/20newsgroups_sweep_bs32.jsonl")
     p.add_argument("--outdir", default="figs")
     a = p.parse_args(argv)
 

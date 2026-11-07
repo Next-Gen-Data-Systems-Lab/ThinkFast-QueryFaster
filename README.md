@@ -250,7 +250,7 @@ python -m src.analyze --results results/smoke.jsonl --outdir figs
 Run this before every CHTC submit. It catches typos in seconds rather than
 after a model has spent ten minutes loading onto a GPU.
 
-## The midterm run (CHTC)
+## Running on CHTC
 
 Copy the project to the access point, then submit from there:
 
@@ -259,7 +259,7 @@ bash chtc/upload.sh
 
 ssh chtc
 cd ThinkFast-QueryFaster
-condor_submit chtc/midterm.sub
+condor_submit chtc/scan_vs_agent.sub
 ```
 
 `upload.sh` uses the `chtc` SSH alias; set `CHTC_HOST` to use a different host.
@@ -269,14 +269,14 @@ Run a short test job first. It writes to its own output file and compares two
 batch sizes, so it also shows whether the sweep changes throughput:
 
 ```bash
-condor_submit SIZES=1000 BATCHES=32,256 TAG=test chtc/midterm.sub
+condor_submit SIZES=1000 BATCHES=32,256 TAG=test chtc/scan_vs_agent.sub
 ```
 
 To run the search agent, which handles queries one at a time and so needs only
 one batch size:
 
 ```bash
-condor_submit ARMS=agent BATCHES=32 TAG=agent chtc/midterm.sub
+condor_submit ARMS=agent BATCHES=32 TAG=agent chtc/scan_vs_agent.sub
 ```
 
 For the full sweep, submit one job per batch size so they run in parallel on
@@ -285,9 +285,9 @@ other. `H200$` leaves out the H200 NVL.
 
 ```bash
 for bs in 1 4 8 16 32 64 256; do
-  condor_submit BATCHES=$bs TAG=sweep_bs$bs GPU='H200$' LENGTH=short chtc/midterm.sub
+  condor_submit BATCHES=$bs TAG=sweep_bs$bs GPU='H200$' LENGTH=short chtc/scan_vs_agent.sub
 done
-condor_submit ARMS=agent BATCHES=32 TAG=agent GPU='H200$' LENGTH=short chtc/midterm.sub
+condor_submit ARMS=agent BATCHES=32 TAG=agent GPU='H200$' LENGTH=short chtc/scan_vs_agent.sub
 ```
 
 HTCondor reads `src/` when a job starts, not when it is submitted, so uploading
@@ -307,9 +307,9 @@ Equivalent by hand on an interactive GPU session:
 python -m src.runner --dataset 20newsgroups --arms classify,ann,hybrid \
     --model Qwen/Qwen2.5-7B-Instruct \
     --corpus-sizes 1000,5000,10000 --batch-sizes 32,64,128,256 \
-    --k 100 --out results/midterm.jsonl
+    --k 100 --out results/20newsgroups_run.jsonl
 
-python -m src.analyze --results results/midterm.jsonl --outdir figs/midterm
+python -m src.analyze --results results/20newsgroups_run.jsonl --outdir figs/20newsgroups_run
 ```
 
 Runs are **resumable**: the runner skips any (arm, corpus size, batch size, k,
@@ -366,7 +366,7 @@ Three reasons this beats chasing a checkpoint in a five-day window:
 3. No gated downloads, no custom serving stack.
 
 A purpose-built decision model (Kev, JEV-9B) needs its own environment, so it runs
-through `src/kev_scan.py` and `chtc/run_kev.sh`, and writes the same score files.
+through `src/kev_scan.py` and `chtc/run_kev_scan.sh`, and writes the same score files.
 
 `--batch-sizes` sets vLLM's `max_num_seqs`, which caps concurrent sequences and
 is therefore the effective batch size. It is the **outer** loop in the runner,
@@ -408,11 +408,13 @@ src/
   analyze.py         quick plots of one run (output to figs/, not committed)
   report_figs.py     report/figs/exchange.png and frontier.png
   paper_figs.py      recall against time (paper, report and, with --slide, the deck)
-chtc/
-  midterm.sub, run.sh      Qwen jobs (scan, hybrid, agent)
-  kev.sub, run_kev.sh      Kev jobs, pinned to one Kev commit
-  scan.sub, run_scan.sh    JEV and reranker jobs (Python 3.12 environment)
-  jev.sub, run_jev.sh      the older JEV-only job
+chtc/                      each .sub has a matching run_<name>.sh
+  scan_vs_agent.sub        the main comparison with Qwen on vLLM (src.runner):
+                           scan, ANN, hybrid and agent, any of them via ARMS
+  kev_scan.sub             scan with Kev-9B (src.kev_scan), pinned Kev commit
+  jev_rerank_scan.sub      scan with JEV-9B or a reranker (src.jev_scan,
+                           src.rerank_scan), Python 3.12 environment
+  jev_scan_old.sub         the first JEV-only job, replaced by jev_rerank_scan
   upload.sh                copies the project to the access point
 report/                    the course report (LaTeX, compile on Overleaf)
 paper/                     the short paper draft (paused)
@@ -454,7 +456,7 @@ the evidence for H1, which is the strongest claim in the project.
 
 Done so far:
 
-- [x] Confirm the container tag and GPU flag in `chtc/midterm.sub`
+- [x] Confirm the container tag and GPU flag in `chtc/scan_vs_agent.sub`
 - [x] Agent arm — the arm H1 and H2 are measured against
 - [x] Second dataset (NFCorpus) and second model (Qwen2.5-1.5B)
 - [x] Measure the exchange rate (about 70 scan decisions per agent step)
@@ -475,7 +477,7 @@ Done so far:
 The two contributions are adaptive k and the exchange rate.
 
 - [x] Kev-9B scan on 20 Newsgroups (1K, 5K, 10K), NFCorpus and the logic queries,
-      one query at a time and packed (`chtc/kev.sub`, `src.kev_compare`)
+      one query at a time and packed (`chtc/kev_scan.sub`, `src.kev_compare`)
 - [x] JEV-9B scan on the same settings (Apache-2.0, pinned revision 7ac669b),
       `python -m src.kev_compare --model jev`. F1 at t = 0.5 / tuned:
       20NG 10K 0.64 / 0.63 (Qwen 0.42 / 0.58, Kev 0.64 / 0.65); logic 10K
@@ -595,7 +597,12 @@ The two contributions are adaptive k and the exchange rate.
       the 27 documents per second packed rate seen on 20 Newsgroups). A full 1M
       scan answers all 20 queries in one pass, so it shows how complete an
       exhaustive scan gets where the agent reaches 0.008. The job builds the
-      arXiv sample itself; `run_kev.sh` adds pyarrow to Kev's environment for it.
+      arXiv sample itself; `run_kev_scan.sh` adds pyarrow to Kev's environment for it.
+- [ ] Job files were renamed on Nov 7 (`midterm.sub` to `scan_vs_agent.sub`,
+      `kev.sub` to `kev_scan.sub`, `scan.sub` to `jev_rerank_scan.sub`, `jev.sub` to
+      `jev_scan_old.sub`, each with its `run_*.sh`). The old copies stay on the
+      access point until jobs 12437629-32 have started, because a queued job reads
+      its script when it starts; delete them after that.
 
 ### Future work
 

@@ -15,10 +15,10 @@ python -m src.runner --dataset synthetic --arms classify,ann,hybrid \\
     --model mock --embed-backend tfidf --corpus-sizes 500,1000 \\
     --batch-sizes 32,128 --out results/smoke.jsonl
 
-# the midterm run
+# the main comparison, as chtc/scan_vs_agent.sub runs it
 python -m src.runner --dataset 20newsgroups --arms classify,ann,hybrid \\
     --model Qwen/Qwen2.5-7B-Instruct --corpus-sizes 1000,5000,10000 \\
-    --batch-sizes 32,64,128,256 --out results/midterm.jsonl
+    --batch-sizes 32,64,128,256 --out results/20newsgroups_run.jsonl
 """
 
 from __future__ import annotations

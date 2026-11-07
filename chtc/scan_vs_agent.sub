@@ -1,19 +1,20 @@
-# GPU run on CHTC. Upload with chtc/upload.sh, then from the project folder on
+# The main comparison: scan, ANN, hybrid and the search agent with Qwen on vLLM
+# (src.runner), on CHTC. Upload with chtc/upload.sh, then from the project folder on
 # the access point:
 #
-#   condor_submit chtc/midterm.sub
+#   condor_submit chtc/scan_vs_agent.sub
 #
 # Short test job, with its own output file:
 #
-#   condor_submit SIZES=1000 BATCHES=32,256 TAG=test chtc/midterm.sub
+#   condor_submit SIZES=1000 BATCHES=32,256 TAG=test chtc/scan_vs_agent.sub
 #
 # Search agent only (it runs queries one at a time, so one batch size is enough):
 #
-#   condor_submit ARMS=agent BATCHES=32 TAG=agent chtc/midterm.sub
+#   condor_submit ARMS=agent BATCHES=32 TAG=agent chtc/scan_vs_agent.sub
 #
 # Batched agent, sweeping queries in flight (BATCHES must cover the largest):
 #
-#   condor_submit ARMS=agent BATCHES=64 AGENT_CONCURRENCY=1,4,16 TAG=c chtc/midterm.sub
+#   condor_submit ARMS=agent BATCHES=64 AGENT_CONCURRENCY=1,4,16 TAG=c chtc/scan_vs_agent.sub
 #
 # Keep comments on their own lines: condor_submit treats a trailing # as part
 # of the value.
@@ -83,17 +84,17 @@ endif
 
 universe                = container
 container_image         = docker://vllm/vllm-openai:v0.6.3
-# The image's entrypoint is the vLLM API server. Without this, run.sh is passed
+# The image's entrypoint is the vLLM API server. Without this, run_scan_vs_agent.sh is passed
 # to that server as an argument and never runs.
 docker_override_entrypoint = true
 should_transfer_files   = YES
 # Keeps partial results if the job is evicted, so the runner can resume.
 when_to_transfer_output = ON_EXIT_OR_EVICT
 
-executable              = chtc/run.sh
+executable              = chtc/run_scan_vs_agent.sh
 arguments               = $(DATASET) $(MODEL) $(SIZES) $(BATCHES) $(K) $(TAG) $(ARMS) $(MAX_QUERIES) $(AGENT_STEPS) $(AGENT_CONCURRENCY) $(MAX_CHARS) $(AGENT_REPLICAS) $(AGENT_TOOLS) $(AGENT_STOP)
 
-transfer_input_files    = src, data, chtc/run.sh, requirements.txt
+transfer_input_files    = src, data, chtc/run_scan_vs_agent.sh, requirements.txt
 transfer_output_files   = results, figs
 
 log                     = logs/$(Cluster)_$(Process).log

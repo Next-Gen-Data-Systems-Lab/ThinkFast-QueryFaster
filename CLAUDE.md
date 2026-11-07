@@ -43,7 +43,7 @@ Keep this file and `README.md` updated with progress as work happens.
 bash chtc/upload.sh                 # copies to ~/ThinkFast-QueryFaster on ap2001
 ssh chtc
 cd ThinkFast-QueryFaster
-condor_submit BATCHES=32 TAG=name GPU='H200$' LENGTH=short chtc/midterm.sub
+condor_submit BATCHES=32 TAG=name GPU='H200$' LENGTH=short chtc/scan_vs_agent.sub
 ```
 
 Submit-time options: `DATASET MODEL SIZES BATCHES K TAG ARMS MAX_QUERIES
@@ -59,18 +59,18 @@ MEMORY DISK`. Qwen2.5-32B needs `DISK=200GB MEMORY=96GB`. The default `GPU` is
 - **vLLM image:** its entrypoint is the API server, so
   `docker_override_entrypoint = true` is required.
 - **`CUDA_VISIBLE_DEVICES`:** HTCondor sets a UUID and vLLM 0.6.3 needs an
-  integer. `run.sh` converts it.
+  integer. `run_scan_vs_agent.sh` converts it.
 - **Uploading:** HTCondor reads `src/` when a job starts, not when it is
   submitted. Uploading over a queued job changes what it runs.
 - **`TAG`:** parallel jobs need different tags or their results overwrite.
 - **GPUs:** `H200$` leaves out the H200 NVL. Blackwell GPUs are too new for vLLM
-  0.6.3, and `midterm.sub` keeps to compute capability 8.0-9.0.
+  0.6.3, and `scan_vs_agent.sub` keeps to compute capability 8.0-9.0.
 - **SSH watchers:** a dropped connection also empties `condor_q` output. Check the
   ssh exit code, or a dead connection looks like finished jobs.
 - **Sliding window:** vLLM refuses prefix caching for models that declare one, such
   as Phi-3.5. `classify.py` passes `disable_sliding_window=True`.
 - **`getpwuid(): uid not found`:** the container has no user for HTCondor's uid,
-  which kills torch inductor. `run_kev.sh` sets `USER`, `LOGNAME` and the
+  which kills torch inductor. `run_kev_scan.sh` sets `USER`, `LOGNAME` and the
   inductor and Triton cache dirs.
 - **SYNERGY data:** build it locally with `python -m src.synergy_build` (needs
   network), then `chtc/upload.sh` copies `data/`. Datasets accept comma lists and
@@ -92,13 +92,13 @@ MEMORY DISK`. Qwen2.5-32B needs `DISK=200GB MEMORY=96GB`. The default `GPU` is
 - Hybrid plans replay offline: `src.embed_ranks` saves the ranking (needs
   sentence-transformers), then `src.access_paths` and `src.crossover` use the
   saved scores. Compare rules with fixed k at equal mean cost, never by eye.
-- Kev job: `condor_submit GPU='H200$' TAG=kev9b DATASET=... SIZES=... chtc/kev.sub`
+- Kev job: `condor_submit GPU='H200$' TAG=kev9b DATASET=... SIZES=... chtc/kev_scan.sub`
   (also `MODES MAX_QUERIES LENGTH`). `python -m src.kev_compare` compares offline.
 - Scan jobs in the Python 3.12 environment: `condor_submit MODULE=jev_scan|rerank_scan
-  MODEL=bge|minilm|- TAG=... DATASET=... SIZES=... chtc/scan.sub`. It transfers
-  `data/`. `chtc/jev.sub` is the older JEV-only version. Pinned HF revision; stock transformers Qwen3.5, so no
+  MODEL=bge|minilm|- TAG=... DATASET=... SIZES=... chtc/jev_rerank_scan.sub`. It transfers
+  `data/`. `chtc/jev_scan_old.sub` is the older JEV-only version. Pinned HF revision; stock transformers Qwen3.5, so no
   repo code runs. Compare with `python -m src.kev_compare --model jev`.
-- `src/kev_scan.py` runs only in Kev's environment through `chtc/run_kev.sh`, pinned
+- `src/kev_scan.py` runs only in Kev's environment through `chtc/run_kev_scan.sh`, pinned
   to a commit whose code was read. Kev's code has not been run on this Mac.
 - `SearchAgent._steps` is a generator, so `find` and `run_many` share one loop.
   A batched row's `wall_s` is latency; cost is `batch_wall_s` over calls.

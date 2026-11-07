@@ -1,18 +1,12 @@
-# Scan jobs in their own Python 3.12 environment (src.jev_scan, src.rerank_scan). Upload with chtc/upload.sh, then from the project folder on
+# JEV-9B scan on CHTC, the first version; chtc/jev_rerank_scan.sub replaces it.
+# Upload with chtc/upload.sh, then from the project folder on
 # the access point:
 #
-#   condor_submit GPU='H200$' LENGTH=short chtc/scan.sub
+#   condor_submit GPU='H200$' LENGTH=short chtc/jev_scan_old.sub
 #
 # Keep comments on their own lines: condor_submit treats a trailing # as part
 # of the value.
 
-if !defined MODULE
-  MODULE = jev_scan
-endif
-# rerank_scan takes MODEL = bge or minilm; - means none.
-if !defined MODEL
-  MODEL = -
-endif
 if !defined DATASET
   DATASET = 20newsgroups
 endif
@@ -38,10 +32,10 @@ container_image         = docker://python:3.12-bookworm
 should_transfer_files   = YES
 when_to_transfer_output = ON_EXIT_OR_EVICT
 
-executable              = chtc/run_scan.sh
-arguments               = $(MODULE) $(DATASET) $(SIZES) $(TAG) $(MAX_QUERIES) $(MODEL)
+executable              = chtc/run_jev_scan_old.sh
+arguments               = $(DATASET) $(SIZES) $(TAG) $(MAX_QUERIES)
 
-transfer_input_files    = src, data, chtc/run_scan.sh
+transfer_input_files    = src, chtc/run_jev_scan_old.sh
 transfer_output_files   = results
 
 log                     = logs/$(Cluster)_$(Process).log

@@ -1,19 +1,25 @@
-# JEV-9B scan on CHTC. Upload with chtc/upload.sh, then from the project folder on
+# Kev scan on CHTC. Upload with chtc/upload.sh, then from the project folder on
 # the access point:
 #
-#   condor_submit GPU='H200$' LENGTH=short chtc/jev.sub
+#   condor_submit GPU='H200$' LENGTH=short chtc/kev_scan.sub
 #
 # Keep comments on their own lines: condor_submit treats a trailing # as part
 # of the value.
 
+if !defined RUN
+  RUN = jaredpalmer/kev-9b@v1.0
+endif
 if !defined DATASET
   DATASET = 20newsgroups
 endif
 if !defined SIZES
   SIZES = 1000
 endif
+if !defined MODES
+  MODES = separate,packed
+endif
 if !defined TAG
-  TAG = jev9b
+  TAG = kev9b
 endif
 # 0 runs every query in the dataset. NFCorpus comparisons use the first 50.
 if !defined MAX_QUERIES
@@ -31,10 +37,10 @@ container_image         = docker://python:3.12-bookworm
 should_transfer_files   = YES
 when_to_transfer_output = ON_EXIT_OR_EVICT
 
-executable              = chtc/run_jev.sh
-arguments               = $(DATASET) $(SIZES) $(TAG) $(MAX_QUERIES)
+executable              = chtc/run_kev_scan.sh
+arguments               = $(RUN) $(DATASET) $(SIZES) $(MODES) $(TAG) $(MAX_QUERIES)
 
-transfer_input_files    = src, chtc/run_jev.sh
+transfer_input_files    = src, data, chtc/run_kev_scan.sh
 transfer_output_files   = results
 
 log                     = logs/$(Cluster)_$(Process).log
