@@ -29,6 +29,9 @@ AGENTS = {
     "7B, embeddings + BM25": "results/20newsgroups_agent7b2t.jsonl",
     "32B, embeddings": "results/20newsgroups_agent32b1t.jsonl",
     "32B, embeddings + BM25": "results/20newsgroups_agent32b2t.jsonl",
+    # Told answer sets can be large, and held to stopping only after two
+    # searches in a row find nothing (--agent-stop dry), up to 256 steps.
+    "7B, persistent": "results/20newsgroups_agentdry.jsonl",
 }
 SCANS = {   # scores file, and how to get documents per second at each N
     "qwen": ("results/20newsgroups_sweep_bs32.scores.jsonl", None),
@@ -80,6 +83,9 @@ def main(argv=None):
                      "precision": float(g.precision.mean()), "seconds": float(g.wall_s.mean()),
                      "steps": float(g.n_steps.mean()),
                      "s_per_call": float(g.t_llm.sum() / g.n_llm_calls.sum()), "scans": {}}
+            if "n_nudges" in g:
+                entry["nudges"] = float(g.n_nudges.mean())
+                entry["hit_step_limit"] = int((~g.stopped_early.astype(bool)).sum())
             if "n_keyword_searches" in g:
                 entry["keyword_share"] = float(g.n_keyword_searches.sum() / max(g.n_steps.sum(), 1))
             line = (f"{name:24s} N={n:6d} agent R {entry['recall']:.3f} "

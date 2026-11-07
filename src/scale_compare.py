@@ -31,6 +31,8 @@ import pandas as pd
 from . import access_paths as AP
 
 ROWS, SCORES = "results/arxiv_scale.jsonl", "results/arxiv_scale.scores.jsonl"
+# Other agents on the same samples, compared against the same scan.
+AGENT_ROWS = {"7B, persistent": "results/arxiv_agentdry.jsonl"}
 SIZES = (10_000, 100_000, 1_000_000)
 
 
@@ -138,6 +140,21 @@ def main(argv=None):
             continue
         r = analyse(rows, n, thresholds)
         if r:
+            show(r)
+            out.append(r)
+        for name, path in AGENT_ROWS.items():
+            if not Path(path).exists():
+                continue
+            extra = frame(path)
+            extra = extra[(extra.arm == "agent") & (extra.corpus_size == n)]
+            if extra.empty:
+                continue
+            hyb = rows[(rows.arm == "hybrid") & (rows.corpus_size == n)]
+            r = analyse(pd.concat([hyb, extra]), n, thresholds)
+            r["agent_name"] = name
+            r["agent"]["nudges"] = float(extra.n_nudges.mean())
+            r["agent"]["hit_step_limit"] = int((~extra.stopped_early.astype(bool)).sum())
+            print(f"\n--- agent: {name}")
             show(r)
             out.append(r)
     Path(args.out).write_text(json.dumps(out, indent=1))

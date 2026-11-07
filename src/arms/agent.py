@@ -74,6 +74,23 @@ Each turn you see the latest search results. Reply with one JSON object and noth
 Stop only when you believe you have found every matching document."""
 
 TOOLS = ("semantic", "keyword")
+
+# The stop rule. "agent" lets the agent stop whenever it says so. "dry" tells it
+# that answer sets can be large and holds it to a rule like the stopping rules
+# of technology-assisted review: it may stop only after DRY_STREAK searches in
+# a row found nothing it kept. A stop before that is refused once with a note,
+# and a second refusal in a row ends the run.
+STOP_RULES = ("agent", "dry")
+STOP_LINE = "Stop only when you believe you have found every matching document."
+PERSIST_LINE = ("Answer sets can be large: hundreds or thousands of documents. Keep "
+                "searching while your searches still turn up matching documents, and "
+                "change your query when one line of searching runs dry. Stop only after "
+                "two searches in a row find no new matching documents.")
+DRY_STREAK = 2
+NUDGE = ("You asked to stop, but your recent searches still found matching documents, "
+         "so there are probably more. Write a new search query.")
+# Only the latest searches are listed, so a long run's prompt stays bounded.
+SHOWN_SEARCHES = 40
 MAX_REPLY_TOKENS = 256
 
 
@@ -157,10 +174,15 @@ def parse_reply(text: str) -> dict | None:
 
 
 def render_turn(query_text: str, kept: int, searches: list[str],
-                results: list[dict]) -> str:
+                results: list[dict], note: str = "") -> str:
+    shown = searches[-SHOWN_SEARCHES:]
+    hidden = (f"({len(searches) - len(shown)} earlier searches not shown) | "
+              if len(searches) > len(shown) else "")
     lines = [f"Search request: {query_text}",
              f"Documents kept so far: {kept}",
-             "Searches so far: " + (" | ".join(searches) or "(none)"), ""]
+             "Searches so far: " + (hidden + " | ".join(shown) or "(none)"), ""]
+    if note:
+        lines[-1:] = ["", note, ""]
     if results:
         lines.append("Latest results:")
         lines += [f"[{i}] {r['snippet']}" for i, r in enumerate(results, 1)]
@@ -223,10 +245,14 @@ class SearchAgent:
     """
 
     def __init__(self, client, model: str, max_steps: int = 8,
-                 temperature: float = 0.0, tools: tuple = ("semantic",)):
+                 temperature: float = 0.0, tools: tuple = ("semantic",),
+                 stop: str = "agent"):
         unknown = set(tools) - set(TOOLS)
         if unknown or not tools:
             raise ValueError(f"tools must be a subset of {TOOLS}, not {tools}")
+        if stop not in STOP_RULES:
+            raise ValueError(f"stop must be one of {STOP_RULES}, not {stop}")
+        self.stop = stop
         self.client = client
         self.model_name = model
         self.max_steps = max_steps
@@ -265,6 +291,8 @@ class SearchAgent:
             parse_failures  int    replies that were not usable JSON
         """
         prompt = SYSTEM_PROMPT_TOOLS if len(self.tools) > 1 else SYSTEM_PROMPT
+        if self.stop == "dry":
+            prompt = prompt.replace(STOP_LINE, PERSIST_LINE)
         system = prompt + (f"\n\nSession {session}." if session else "")
         kept: set[str] = set()
         seen: set[str] = set()
@@ -272,13 +300,15 @@ class SearchAgent:
         results: list[dict] = []
         stats = {"steps": 0, "stopped_early": False, "gen_tokens": 0,
                  "prompt_tokens": 0, "llm_seconds": 0.0, "llm_calls": 0,
-                 "parse_failures": 0, "keyword_searches": 0}
+                 "parse_failures": 0, "keyword_searches": 0, "nudges": 0}
+        dry = 0          # searches in a row whose results the agent kept none of
+        note = ""
 
         while True:
             reply = yield [
                 {"role": "system", "content": system},
                 {"role": "user", "content": render_turn(
-                    query_text, len(kept), searches, results)}]
+                    query_text, len(kept), searches, results, note)}]
             stats["llm_calls"] += 1
             stats["gen_tokens"] += reply.gen_tokens
             stats["prompt_tokens"] += reply.prompt_tokens
@@ -289,18 +319,26 @@ class SearchAgent:
                 stats["parse_failures"] += 1
                 parsed = {}
             keep = parsed.get("keep")
+            before = len(kept)
             for i in keep if isinstance(keep, list) else []:
                 if isinstance(i, int) and 1 <= i <= len(results):
                     kept.add(results[i - 1]["id"])
+            if results and not note:     # a re-judged batch is not a new search
+                dry = dry + 1 if len(kept) == before else 0
 
             next_search = parsed.get("next_search")
             if not isinstance(next_search, str) or not next_search.strip():
                 # A bad first reply must not end the run with nothing searched.
                 if stats["steps"] == 0:
                     next_search = query_text
+                elif self.stop == "dry" and dry < DRY_STREAK and not note:
+                    note = NUDGE
+                    stats["nudges"] += 1
+                    continue
                 else:
                     stats["stopped_early"] = True
                     break
+            note = ""
             if stats["steps"] >= self.max_steps:
                 break
 
@@ -338,11 +376,13 @@ def package(agent: SearchAgent, tool: RetrievalTool, query, matches: set[str],
             "llm_calls": float(stats.get("llm_calls", 0)),
             "parse_failures": float(stats.get("parse_failures", 0)),
             "keyword_searches": float(stats.get("keyword_searches", 0)),
+            "nudges": float(stats.get("nudges", 0)),
         },
         extra={
             "model": agent.model_name,
             "max_steps": agent.max_steps,
             "tools": ",".join(agent.tools),
+            "stop_rule": agent.stop,
             "stopped_early": bool(stats.get("stopped_early", False)),
         },
     )

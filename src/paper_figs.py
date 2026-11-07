@@ -3,8 +3,9 @@
 Each scan model is a curve: it classifies documents in embedding order at its
 measured documents per second, so after T seconds it has read k = T * rate
 documents of each query's corpus (t = 0.5). Each agent variant is a point at its
-mean seconds and recall. One panel per dataset; arXiv appears once its rows
-exist. Everything is replayed from saved scores.
+mean seconds and recall. One panel per dataset; arXiv (100K by default, see
+--arxiv-n) appears once its rows exist, and its curve ends where the job's
+classified top 20K runs out. Everything is replayed from saved scores.
 
 Usage: python -m src.paper_figs --outdir paper/figs
 """
@@ -32,6 +33,7 @@ GRID = np.logspace(-0.5, 2.6, 60)        # seconds per query
 AGENT_STYLE = {   # marker, filled
     "7B, embeddings": ("o", True), "7B, embeddings + BM25": ("o", False),
     "32B, embeddings": ("D", True), "32B, embeddings + BM25": ("D", False),
+    "7B, persistent": ("s", True),
 }
 
 
@@ -77,7 +79,7 @@ def panel_20ng() -> tuple[str, dict, dict]:
               "Kev-9B": curve(kev, [rates["kev"]] * len(kev)),
               "Kev-9B, packed": curve(kev, [rates["kev packed"]] * len(kev)),
               "JEV-9B": curve(jev, [rates["jev"]] * len(jev))}
-    return "20 Newsgroups, 10K documents", curves, agent_points(AC.AGENTS, n=n)
+    return "20 Newsgroups, 10K", curves, agent_points(AC.AGENTS, n=n)
 
 
 def panel_synergy() -> tuple[str, dict, dict]:
@@ -98,27 +100,34 @@ def panel_arxiv(n: int = 1_000_000) -> tuple[str, dict, dict] | None:
         return None
     rate = float(h.n_docs_scored.sum() / h.t_classify.sum())
     q = AP.load("arxiv", n, scores, arm="hybrid")
-    curves = {"Qwen 7B": curve(q, [rate] * len(q))}
+    y = curve(q, [rate] * len(q))
+    # Only each query's top k was classified, so the curve stops at that depth
+    # rather than going flat as if the scan had nothing more to find.
+    y[GRID * rate > int(h.k.iloc[0])] = np.nan
+    curves = {"Qwen 7B": y}
     size = f"{n // 1_000_000}M" if n >= 1_000_000 else f"{n // 1000}K"
-    return f"arXiv, {size} documents", curves, agent_points({"7B, embeddings": rows}, n=n)
+    return f"arXiv, {size}", curves, agent_points(
+        {"7B, embeddings": rows, "7B, persistent": "results/arxiv_agentdry.jsonl"}, n=n)
 
 
-def figure(out: Path, arxiv_n: int = 100_000) -> None:
+def figure(out: Path, arxiv_n: int = 100_000, panel_width: float = 3.4,
+           height: float = 3.0, dpi: int = 200, dashed_note: bool = True) -> None:
     panels = [p for p in (panel_20ng(), panel_synergy(), panel_arxiv(arxiv_n)) if p]
-    fig, axes = plt.subplots(1, len(panels), figsize=(3.4 * len(panels), 3.0), sharey=True)
+    fig, axes = plt.subplots(1, len(panels), figsize=(panel_width * len(panels), height), sharey=True)
     axes = np.atleast_1d(axes)
     for ax, (title, curves, agents) in zip(axes, panels):
         for name, y in curves.items():
             base = name.replace(", packed", "")
             ax.plot(GRID, y, color=COLOR[base], linewidth=1.8,
                     linestyle="--" if "packed" in name else "-")
-            if "packed" in name:
+            if "packed" in name and dashed_note:
                 # Ends where the separate curve ends, so label it in the empty
-                # upper left, above its own rise.
-                ax.text(GRID[0] * 1.15, 0.8, "Kev, one pass for all\nqueries (dashed)",
-                        ha="left", va="top", fontsize=7.5, color=INK)
-            else:
-                ax.annotate(name.replace("-9B", "").replace(" 7B", ""), (GRID[-1], y[-1]),
+                # lower right, below the plateaus and right of the agents.
+                ax.text(GRID[-1], 0.04, "dashed: Kev, one\npass for all queries",
+                        ha="right", va="bottom", fontsize=7.5, color=INK)
+            elif "packed" not in name:
+                last = np.flatnonzero(np.isfinite(y))[-1]
+                ax.annotate(name.replace("-9B", "").replace(" 7B", ""), (GRID[last], y[last]),
                             xytext=(3, 0), textcoords="offset points", va="center",
                             fontsize=7.5, color=INK)
         for name, (secs, rec) in agents.items():
@@ -144,7 +153,7 @@ def figure(out: Path, arxiv_n: int = 100_000) -> None:
     fig.tight_layout(rect=(0, 0.1, 1, 1))
     out.mkdir(parents=True, exist_ok=True)
     fig.savefig(out / "recall_time.pdf")
-    fig.savefig(out / "recall_time.png", dpi=200)
+    fig.savefig(out / "recall_time.png", dpi=dpi)
     plt.close(fig)
 
 
@@ -154,8 +163,14 @@ def main(argv=None):
     p.add_argument("--outdir", default="paper/figs")
     p.add_argument("--arxiv-n", type=int, default=100_000,
                    help="arXiv corpus size for the third panel (10000, 100000 or 1000000)")
+    p.add_argument("--slide", action="store_true",
+                   help="narrower panels at higher resolution, so the text is larger on a slide")
     args = p.parse_args(argv)
-    figure(Path(args.outdir), args.arxiv_n)
+    if args.slide:
+        figure(Path(args.outdir), args.arxiv_n, panel_width=2.45, height=2.55, dpi=320,
+               dashed_note=False)
+    else:
+        figure(Path(args.outdir), args.arxiv_n)
     print("wrote", Path(args.outdir) / "recall_time.pdf")
 
 

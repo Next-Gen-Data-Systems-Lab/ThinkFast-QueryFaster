@@ -484,8 +484,10 @@ one query at a time here; with one pass for all 20 queries it reaches
 \includegraphics[width=\linewidth]{recall_time.pdf}
 \caption{Recall against seconds per query. Curves: each scan model reading
 documents in embedding order at its measured rate ($t=0.5$); dashed, Kev with
-one pass for all queries. Points: the four agents. Every agent lies below every
-scan curve.}
+one pass for all queries. Points: the four agents. On arXiv (100K papers,
+\S\ref{sec:scale}) only Qwen and the 7B agent were run, and the curve ends at
+140 seconds, where the classified top 20,000 runs out. Every agent lies below
+every scan curve.}
 \label{fig:time}
 \end{figure}
 

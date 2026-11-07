@@ -38,6 +38,7 @@ AGENTS = {
     "7B, embeddings + BM25": "results/synergy_agent7b2t.jsonl",
     "32B, embeddings": "results/synergy_agent32b1t.jsonl",
     "32B, embeddings + BM25": "results/synergy_agent32b2t.jsonl",
+    "7B, persistent": "results/synergy_agentdry.jsonl",
 }
 
 
@@ -118,6 +119,9 @@ def analyse(c: dict) -> dict:
                  "steps": float(np.mean([r.n_steps for r in rs])),
                  "docs_seen": float(np.mean([r.n_docs_scored for r in rs])),
                  "s_per_call": tau, "equal_time": {}}
+        if "n_nudges" in rs[0]:
+            entry["nudges"] = float(np.mean([r.n_nudges for r in rs]))
+            entry["hit_step_limit"] = int(sum(not bool(r.stopped_early) for r in rs))
         if "n_keyword_searches" in rs[0]:
             entry["keyword_share"] = float(np.sum([r.n_keyword_searches for r in rs])
                                            / max(np.sum([r.n_steps for r in rs]), 1))

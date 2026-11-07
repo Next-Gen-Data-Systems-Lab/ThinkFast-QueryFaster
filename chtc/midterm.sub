@@ -73,6 +73,9 @@ endif
 if !defined AGENT_TOOLS
   AGENT_TOOLS = semantic
 endif
+if !defined AGENT_STOP
+  AGENT_STOP = agent
+endif
 # Regular expression on the device name, e.g. GPU=H200 to keep runs comparable.
 if !defined GPU
   GPU = A100|H200
@@ -88,7 +91,7 @@ should_transfer_files   = YES
 when_to_transfer_output = ON_EXIT_OR_EVICT
 
 executable              = chtc/run.sh
-arguments               = $(DATASET) $(MODEL) $(SIZES) $(BATCHES) $(K) $(TAG) $(ARMS) $(MAX_QUERIES) $(AGENT_STEPS) $(AGENT_CONCURRENCY) $(MAX_CHARS) $(AGENT_REPLICAS) $(AGENT_TOOLS)
+arguments               = $(DATASET) $(MODEL) $(SIZES) $(BATCHES) $(K) $(TAG) $(ARMS) $(MAX_QUERIES) $(AGENT_STEPS) $(AGENT_CONCURRENCY) $(MAX_CHARS) $(AGENT_REPLICAS) $(AGENT_TOOLS) $(AGENT_STOP)
 
 transfer_input_files    = src, data, chtc/run.sh, requirements.txt
 transfer_output_files   = results, figs

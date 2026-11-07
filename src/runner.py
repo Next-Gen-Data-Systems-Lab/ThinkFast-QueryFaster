@@ -120,6 +120,10 @@ def main(argv=None):
                    help="candidates for the ann and hybrid arms")
     p.add_argument("--agent-tools", default="semantic",
                    help="semantic, or semantic,keyword to add BM25 search")
+    p.add_argument("--agent-stop", default="agent", choices=AG.STOP_RULES,
+                   help="agent: stop when the agent says so; dry: only after two "
+                        "searches in a row find nothing, with a prompt that says "
+                        "answer sets can be large")
     p.add_argument("--agent-k", type=int, default=20,
                    help="documents the agent sees per search")
     p.add_argument("--agent-max-steps", type=int, default=8,
@@ -232,7 +236,8 @@ def main(argv=None):
                 if "agent" in arms:
                     tools = tuple(x.strip() for x in args.agent_tools.split(",") if x.strip())
                     agent = AG.SearchAgent(AG.build_chat(model), args.model,
-                                           max_steps=args.agent_max_steps, tools=tools)
+                                           max_steps=args.agent_max_steps, tools=tools,
+                                           stop=args.agent_stop)
                     keyword = None
                     if "keyword" in tools:
                         keyword = KW.KeywordIndex()

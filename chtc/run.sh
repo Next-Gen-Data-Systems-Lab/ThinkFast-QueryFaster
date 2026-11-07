@@ -61,6 +61,8 @@ MAX_CHARS="${11:-2000}"
 AGENT_REPLICAS="${12:-1}"
 # semantic, or semantic,keyword to give the agent BM25 search as well.
 AGENT_TOOLS="${13:-semantic}"
+# agent (stop when it says so) or dry (only after two searches find nothing).
+AGENT_STOP="${14:-agent}"
 
 OUT="results/${DATASET}_${TAG}.jsonl"
 echo "=== dataset=$DATASET model=$MODEL sizes=$SIZES batches=$BATCHES k=$K arms=$ARMS ==="
@@ -100,6 +102,7 @@ for BS in "${BATCH_LIST[@]}"; do
         --max-chars "$MAX_CHARS" \
         --agent-replicas "$AGENT_REPLICAS" \
         --agent-tools "$AGENT_TOOLS" \
+        --agent-stop "$AGENT_STOP" \
         --out "$OUT" \
         --scores-out "$SCORES"
 done

@@ -1,6 +1,6 @@
 """Figures for the final report, from results/access_paths.json and crossover.json.
 
-Usage: python -m src.report_figs --outdir figs/report
+Usage: python -m src.report_figs   (writes report/figs/)
 """
 
 from __future__ import annotations
@@ -86,7 +86,7 @@ def main(argv=None):
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--paths", default="results/access_paths.json")
     p.add_argument("--crossover", default="results/crossover.json")
-    p.add_argument("--outdir", default="figs/report")
+    p.add_argument("--outdir", default="report/figs")
     args = p.parse_args(argv)
     out = Path(args.outdir)
     out.mkdir(parents=True, exist_ok=True)

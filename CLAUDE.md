@@ -47,7 +47,7 @@ condor_submit BATCHES=32 TAG=name GPU='H200$' LENGTH=short chtc/midterm.sub
 ```
 
 Submit-time options: `DATASET MODEL SIZES BATCHES K TAG ARMS MAX_QUERIES
-AGENT_STEPS AGENT_CONCURRENCY AGENT_REPLICAS AGENT_TOOLS MAX_CHARS GPU LENGTH
+AGENT_STEPS AGENT_CONCURRENCY AGENT_REPLICAS AGENT_TOOLS AGENT_STOP MAX_CHARS GPU LENGTH
 MEMORY DISK`. Qwen2.5-32B needs `DISK=200GB MEMORY=96GB`. The default `GPU` is
 `A100|H200`, so pass `GPU='H200$'` for timings comparable with other runs.
 
@@ -111,6 +111,10 @@ The short paper is `paper/paper.tex` (ACM sigconf; figure from
 `python -m src.paper_figs`). The final report is `report/report.tex` with `refs.bib` and `figs/`, compiled on
 Overleaf (no LaTeX on this Mac or on CHTC). Keep its numbers in step with README.
 
-Results and status are in the Status section of `README.md`. The midterm deck is
-https://claude.ai/artifact/E1R5FHuvJHniGchsHttgeE (10 slides plus a backup, with
-timed speaker notes).
+Results and status are in the Status section of `README.md`. `results/README.md` maps
+each results file to its experiment, script and report table: add a row when a new
+TAG lands. Teammates read the repo too, so keep stray test outputs out of `results/`. The midterm deck is
+https://claude.ai/artifact/E1R5FHuvJHniGchsHttgeE (9 slides plus 4 backups, with
+timed speaker notes, about 7 minutes; updated Nov 7 with SYNERGY, arXiv, the
+stronger agents and the decision models). Its figure comes from
+`python -m src.paper_figs --slide`.

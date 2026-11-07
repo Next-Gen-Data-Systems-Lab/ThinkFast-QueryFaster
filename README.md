@@ -60,8 +60,10 @@ Precision is similar for both, 0.68-0.76.
   20 queries at every size. At t = 0.5 the two tie at 10K. See the arXiv item
   under [Before the final report](#before-the-final-report-dec-7).
 
-**Next:** rehearse the midterm talk (around Nov 10), then work through the plan
-under [Next steps](#next-steps) for the final report (due Dec 7).
+**Next:** rehearse the midterm talk (Nov 10; the deck was updated Nov 7 with
+all results), and finish the two experiments under
+[Before the final report](#before-the-final-report-dec-7): a persistent agent,
+and Kev scanning arXiv at 100K and 1M.
 
 ### Offline analysis of hybrid plans
 
@@ -373,58 +375,47 @@ construction.
 
 ---
 
-## What the smoke run already shows
-
-From `figs/summary.md` on synthetic data, with k=100:
-
-| Arm | N | Recall | Precision |
-|---|---:|---:|---:|
-| Classify | 2,000 | **1.000** | 1.000 |
-| ANN | 2,000 | 0.250 | 1.000 |
-| Hybrid | 2,000 | 0.250 | 1.000 |
-
-Hybrid recall equals its retrieval ceiling exactly. When a query has more
-relevant documents than `k`, retrieve-then-classify **cannot** reach them no
-matter how good the classifier is — 80% of synthetic queries hit this. Every
-hybrid row records `ann_recall_ceiling` and `k_vs_gold_ratio` so the effect is
-measured rather than inferred.
-
-This is the caveat on "hybrid dominates everywhere", and it is a real result
-for the report: the hybrid wins on throughput but inherits a hard recall cap,
-while the full scan is exhaustive by construction. That is H1's argument,
-visible before any GPU work.
-
-**Caveat:** synthetic data only. The numbers above are a pipeline check, not
-evidence. Real numbers come from the 20 Newsgroups run.
-
----
-
 ## Layout
+
+`results/README.md` says which results file backs which table and which script
+reads it.
 
 ```
 src/
-  data.py          corpora + query sets + subsampling + fingerprinting
-  metrics.py       ArmResult, set metrics, nDCG, threshold sweep
-  runner.py        experiment driver (resumable, JSONL)
-  analyze.py       figures + markdown tables for the report
-  summarize_runs.py  every number the deck and report use
-  embed_ranks.py   saves all query-document similarities, for offline replay
-  access_paths.py  fixed k, adaptive k, oracle, threshold calibration, transfer
-  crossover.py     performance model, equal-time comparison, exchange rates
-  report_figs.py   final report figures
-  kev_scan.py      scan with Kev, in its own environment on CHTC
-  jev_scan.py      scan with JEV-9B (transformers + peft), on CHTC
-  kev_compare.py   Kev or JEV against Qwen from saved scores, and against the agent at equal time
-  index_costs.py   HNSW build, insert and deep-k recall (needs hnswlib)
+  data.py            corpora, query sets, subsampling, fingerprints
+  metrics.py         ArmResult, set metrics, threshold sweep
+  runner.py          GPU experiment driver for Qwen (resumable, JSONL)
   arms/
-    classify.py    Approach B  (+ MockDecisionModel for offline tests)
-    ann.py         Approaches C and D
-    agent.py       Approach A (+ MockChat for offline tests)
+    classify.py      the scan (+ MockDecisionModel for offline tests)
+    ann.py           embedding search, and hybrid (search, then classify the top k)
+    agent.py         the search agent (+ MockChat); stop rules "agent" and "dry"
+    keyword.py       BM25, the agent's optional second tool
+  kev_scan.py        scan with Kev-9B, in Kev's own environment on CHTC
+  jev_scan.py        scan with JEV-9B (transformers + peft), on CHTC
+  rerank_scan.py     scan with a cross-encoder reranker (bge, MiniLM)
+  synergy_build.py   builds the SYNERGY texts from PubMed and OpenAlex
+  embed_ranks.py     saves query-document similarities for offline replay
+  # analysis: replays saved scores, no GPU needed
+  summarize_runs.py  the deck's and the first report tables' numbers
+  access_paths.py    fixed k, adaptive k, oracle, thresholds
+  crossover.py       exchange rates, equal time on 20 Newsgroups
+  kev_compare.py     Kev or JEV against Qwen
+  baselines.py       all seven scorers (tab:scorers)
+  agents_compare.py  every agent against every scan, 20 Newsgroups
+  synergy_compare.py the same per SYNERGY review
+  scale_compare.py   arXiv at 10K, 100K and 1M
+  index_costs.py     HNSW against exact search (needs hnswlib)
+  analyze.py         quick plots of one run (output to figs/, not committed)
+  report_figs.py     report/figs/exchange.png and frontier.png
+  paper_figs.py      recall against time (paper, report and, with --slide, the deck)
 chtc/
-  midterm.sub      HTCondor submit file
-  run.sh           job executable (runs smoke test first)
-  run_kev.sh, kev.sub   the Kev job, pinned to one Kev commit
-  upload.sh        copies the project to the access point
+  midterm.sub, run.sh      Qwen jobs (scan, hybrid, agent)
+  kev.sub, run_kev.sh      Kev jobs, pinned to one Kev commit
+  scan.sub, run_scan.sh    JEV and reranker jobs (Python 3.12 environment)
+  jev.sub, run_jev.sh      the older JEV-only job
+  upload.sh                copies the project to the access point
+report/                    the course report (LaTeX, compile on Overleaf)
+paper/                     the short paper draft (paused)
 ```
 
 ### The interface (fixed — do not renegotiate)
@@ -579,14 +570,32 @@ The two contributions are adaptive k and the exchange rate.
 - [ ] Short paper: draft in `paper/paper.tex` (ACM sigconf, about 2,000 words,
       `refs.bib`, figure from `python -m src.paper_figs`). Paused (Nov 7) to
       focus on experiments and the report; the arXiv results still need to go
-      in. `paper_figs` now draws an arXiv 1M panel automatically, and at t = 0.5
-      its recalls are near zero, so choose N and threshold before using it. `report/` stays
+      in. `paper_figs` draws a third panel for arXiv at 100K (`--arxiv-n`; chosen
+      Nov 7 because at 1M every recall is under 0.12 on the shared axis and the
+      agent's point sits on the curve). The arXiv curve ends where the classified
+      top 20K runs out. The report uses the same figure. `report/` stays
       the longer course report and still needs the new results.
 - [ ] Final report: draft in `report/report.tex` (LaTeX, compile on Overleaf).
       All results are in, including JEV-9B, SYNERGY and arXiv scale (Table
       `tab:scale`); no TODOs left. Not yet compiled. The story changes: low recall was
       mostly a Qwen problem, so the scan-against-agent result gets stronger with
       a real decision model, and the threshold finding becomes a zero-shot caveat.
+- [ ] Is the agent's early stopping a prompt problem? (submitted Nov 7, jobs
+      12437628-30, TAG agentdry). `--agent-stop dry` (submit option `AGENT_STOP=dry`)
+      tells the 7B agent that answer sets can hold thousands of documents and
+      holds it to a stopping rule from technology-assisted review: it may stop
+      only after two searches in a row find nothing it keeps. An earlier stop is
+      refused once with a note; a second refusal in a row ends the run. Up to 256
+      steps; only the latest 40 searches are listed in its prompt. Runs on 20
+      Newsgroups 10K, all 26 SYNERGY reviews and arXiv 100K.
+      `src.agents_compare`, `src.synergy_compare` and `src.scale_compare` pick it
+      up as "7B, persistent", and `paper_figs` draws it as a square.
+- [ ] Kev at scale (submitted Nov 7): packed scans of arXiv at 100K (job
+      12437631, TAG kev9b, about 1 h) and 1M (12437632, TAG kev9b1m, about 10 h at
+      the 27 documents per second packed rate seen on 20 Newsgroups). A full 1M
+      scan answers all 20 queries in one pass, so it shows how complete an
+      exhaustive scan gets where the agent reaches 0.008. The job builds the
+      arXiv sample itself; `run_kev.sh` adds pyarrow to Kev's environment for it.
 
 ### Future work
 

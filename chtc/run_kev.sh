@@ -39,6 +39,12 @@ git -C "$SCRATCH/kev" checkout -q "$KEV_COMMIT"
 PY="$SCRATCH/kev/.venv/bin/python"
 # The fused kernels are Kev's default on NVIDIA, and it refuses any other version.
 uv pip install -q --python "$PY" "flash-linear-attention==$FLA_VERSION"
+# The arXiv sample is built in the job (upload.sh leaves data/arxiv out) and read
+# with pyarrow. This adds it if Kev's environment lacks it and changes nothing else.
+if [[ "$DATASET" == *arxiv* ]]; then
+    uv pip install -q --python "$PY" pyarrow
+    "$PY" -c "import pyarrow, huggingface_hub; print('pyarrow', pyarrow.__version__)"
+fi
 "$PY" -c "import torch, transformers, kev; print('torch', torch.__version__, 'transformers', transformers.__version__, torch.cuda.get_device_name(0))"
 
 PYTHONPATH="$PWD" "$PY" -m src.kev_scan \
