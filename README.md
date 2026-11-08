@@ -1,8 +1,5 @@
 # Scan or search?
 
-CS 839 project (Ayesha Shafique, Nabanita Bag, Nida Tanveer). Midterm talk Nov
-10, final report Dec 7, 2026.
-
 **The question.** Some requests need *every* matching document: all studies for
 a medical review, all emails about a deal. An LLM can answer them two ways:
 
