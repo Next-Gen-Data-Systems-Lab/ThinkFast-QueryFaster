@@ -67,6 +67,7 @@ def env_stamp(args) -> dict:
         "model": args.model,
         "embed_backend": args.embed_backend,
         "embed_model": args.embed_model,
+        "prefix_caching": not args.no_prefix_cache,
     }
     for mod in ("torch", "vllm", "sentence_transformers"):
         try:
@@ -135,6 +136,9 @@ def main(argv=None):
                         "--max-chars")
     p.add_argument("--listwise-group", type=int, default=20,
                    help="documents per prompt for the listwise arm")
+    p.add_argument("--no-prefix-cache", action="store_true",
+                   help="turn off vLLM prefix caching (vLLM 0.6.3 crashed with an "
+                        "illegal memory access on list-wise SYNERGY prompts with it on)")
     p.add_argument("--agent-max-steps", type=int, default=8,
                    help="hard cap on agent search iterations")
     p.add_argument("--agent-concurrency", default="",
@@ -224,6 +228,7 @@ def main(argv=None):
                     max_model_len=args.max_model_len,
                     gpu_memory_utilization=args.gpu_memory_utilization,
                     seed=args.seed,
+                    prefix_caching=not args.no_prefix_cache,
                 )
                 print(f"[runner]   ready in {time.perf_counter()-t0:.1f}s", flush=True)
 

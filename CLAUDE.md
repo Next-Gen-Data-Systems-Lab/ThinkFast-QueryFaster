@@ -53,7 +53,7 @@ condor_submit BATCHES=32 TAG=name GPU='H200$' LENGTH=short chtc/scan_vs_agent.su
 ```
 
 Submit-time options: `DATASET MODEL SIZES BATCHES K TAG ARMS MAX_QUERIES
-AGENT_STEPS AGENT_CONCURRENCY AGENT_REPLICAS AGENT_TOOLS AGENT_STOP AGENT_SNIPPET AGENT_KMAX LISTWISE_GROUP MAX_CHARS GPU AVOID LENGTH
+AGENT_STEPS AGENT_CONCURRENCY AGENT_REPLICAS AGENT_TOOLS AGENT_STOP AGENT_SNIPPET AGENT_KMAX LISTWISE_GROUP PREFIX_CACHE MAX_CHARS GPU AVOID LENGTH
 MEMORY DISK`. `AVOID` is a regular expression on machine names to keep a job off. Qwen2.5-32B needs `DISK=200GB MEMORY=96GB`. The default `GPU` is
 `A100|H200`, so pass `GPU='H200$'` for timings comparable with other runs.
 
@@ -85,6 +85,9 @@ MEMORY DISK`. `AVOID` is a regular expression on machine names to keep a job off
   classify each query's top 20K by embedding (`ARMS=hybrid K=20000`) and replay
   equal-time plans from those scores (`python -m src.scale_compare`). `upload.sh`
   leaves `data/arxiv` out.
+- **vLLM crash on list-wise SYNERGY:** with prefix caching on, vLLM 0.6.3 hit a CUDA
+  illegal memory access on review 8 (Jeyaraman_2020) three times. The rerun uses
+  `PREFIX_CACHE=off`; rows record `prefix_caching`.
 - **Token budget:** `max_num_batched_tokens` defaults to 2048, which limits
   prefill-only work. The runner sets batch size x 512. Don't size it from
   `max_model_len`: at batch size 256 that means profiling a 524K-token step.

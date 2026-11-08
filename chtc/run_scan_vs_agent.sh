@@ -69,6 +69,10 @@ AGENT_SNIPPET="${15:-300}"
 AGENT_KMAX="${16:-0}"
 # Documents per prompt for the listwise arm.
 LISTWISE_GROUP="${17:-20}"
+# on, or off to turn off vLLM prefix caching.
+PREFIX_CACHE="${18:-on}"
+CACHE_FLAG=()
+[[ "$PREFIX_CACHE" == "off" ]] && CACHE_FLAG=(--no-prefix-cache)
 
 OUT="results/${DATASET}_${TAG}.jsonl"
 echo "=== dataset=$DATASET model=$MODEL sizes=$SIZES batches=$BATCHES k=$K arms=$ARMS ==="
@@ -112,6 +116,7 @@ for BS in "${BATCH_LIST[@]}"; do
         --agent-snippet-chars "$AGENT_SNIPPET" \
         --agent-k-max "$AGENT_KMAX" \
         --listwise-group "$LISTWISE_GROUP" \
+        ${CACHE_FLAG[@]+"${CACHE_FLAG[@]}"} \
         --out "$OUT" \
         --scores-out "$SCORES"
 done

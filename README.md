@@ -106,13 +106,13 @@ questions).** On 20 Newsgroups 10K and SYNERGY, recall and seconds per query:
 
 | Jobs | What | Why |
 |---|---|---|
-| 12439020 | The list-wise scan on SYNERGY. Jobs 12438054 and 12439001 both hit a CUDA illegal memory access in vLLM on the 8th review, both on host dbrundage-chtcgpu5000; this run avoids that host (`AVOID=chtcgpu5000`) | Finishes finding 6 |
+| 12439024 | The list-wise scan on all 26 SYNERGY reviews, with vLLM prefix caching off (`PREFIX_CACHE=off`). Jobs 12438054, 12439001 and 12439020 each hit a CUDA illegal memory access in vLLM on the 8th review (Jeyaraman_2020); the third avoided the first host name but landed on gpu5000, possibly the same machine | Finishes finding 6 |
 | 12437632 | Kev scanning all of arXiv 1M | How complete an exhaustive scan gets at scale |
 
 **Next:** rehearse for Nov 10. The deck (main-result slide, a new slide on the
 agent variants, the summary) and the report (abstract, `tab:agents`, new
 `sec:freer`, arXiv in `sec:scale`, discussion, conclusion) now carry findings 1
-and 6. When 12439020 lands, replace the report's 7-review SYNERGY list-wise
+and 6. When 12439024 lands, replace the report's 7-review SYNERGY list-wise
 sentence (marked TODO in a comment). The midterm-era numbers (one query at a time, without equal time) are in
 the deck's backup slides and `python -m src.summarize_runs results`.
 
@@ -665,8 +665,8 @@ The two contributions are adaptive k and the exchange rate.
       (jobs 12438047-54, TAGs agentfull, agentk, agentkdry, listwise, on 20
       Newsgroups 10K and all of SYNERGY). Raised by Ayesha. Done except the
       SYNERGY list-wise scan, which crashed after 7 reviews (CUDA illegal memory
-      access in vLLM), twice on the same host, and was resubmitted as 12439020
-      on another host. Results are finding 6 in
+      access in vLLM) three times on the same review, and was resubmitted as
+      12439024 with prefix caching off. Results are finding 6 in
       Status; `python -m src.agents_compare`, `src.synergy_compare` and
       `src.listwise_compare` print them.
       - `AGENT_SNIPPET=2000` (`--agent-snippet-chars`): the agent sees 2,000

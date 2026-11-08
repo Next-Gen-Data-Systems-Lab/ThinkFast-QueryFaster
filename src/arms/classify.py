@@ -70,6 +70,7 @@ class DecisionModel:
         gpu_memory_utilization: float = 0.85,
         dtype: str = "auto",
         seed: int = 0,
+        prefix_caching: bool = True,
     ):
         from vllm import LLM, SamplingParams
 
@@ -84,7 +85,7 @@ class DecisionModel:
             gpu_memory_utilization=gpu_memory_utilization,
             dtype=dtype,
             seed=seed,
-            enable_prefix_caching=True,
+            enable_prefix_caching=prefix_caching,
             # vLLM refuses prefix caching if a model declares a sliding window,
             # as Phi-3.5 does. Our context is far shorter than any such window.
             disable_sliding_window=True,
