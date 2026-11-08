@@ -125,7 +125,9 @@ def synergy() -> dict | None:
             # One query per review, so key the rows by the scan's query id.
             agents[name] = pd.DataFrame(
                 [g.iloc[0] for g in got], index=[q.id for q in lw])
-    return compare({"listwise": (lw, lw_rates), "pointwise": (pw, pw_rates)}, agents)
+    out = compare({"listwise": (lw, lw_rates), "pointwise": (pw, pw_rates)}, agents)
+    out["reviews"] = ids
+    return out
 
 
 def show(title: str, r: dict) -> None:
@@ -151,11 +153,14 @@ def main(argv=None):
     p.add_argument("--out", default="results/listwise_compare.json")
     args = p.parse_args(argv)
     out = {}
-    for title, fn in (("20 Newsgroups, N = 10,000", newsgroups), ("SYNERGY, 26 reviews", synergy)):
+    for title, fn in (("20 Newsgroups, N = 10,000", newsgroups), ("SYNERGY", synergy)):
         r = fn()
         if r is None:
             print(f"skip {title}: no listwise rows yet")
             continue
+        if "reviews" in r:
+            # vLLM crashed on some reviews, so say how many are in.
+            title = f"SYNERGY, {len(r['reviews'])} of 26 reviews"
         show(title, r)
         out[title] = r
     Path(args.out).write_text(json.dumps(out, indent=1, default=float))

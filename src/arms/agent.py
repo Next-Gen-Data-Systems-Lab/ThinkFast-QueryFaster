@@ -97,7 +97,12 @@ NEXT_SEARCH_FIELD = '"next_search": "<your next search query, or null to stop>"'
 K_FIELD = ', "k": <how many results that search should return, {k_min} to {k_max}>'
 K_LINE = "You choose how many results each search returns."
 K_MIN = 5
-MAX_REPLY_TOKENS = 256
+# Long enough for a keep list over 100 results; the agent rarely writes more.
+MAX_REPLY_TOKENS = 512
+# A reply that is not usable JSON is asked for again, not taken as a stop.
+PARSE_RETRIES = 2
+RETRY_NOTE = ("Your last reply was not one valid JSON object. Reply again with one JSON "
+              "object only, in the format given above.")
 
 
 @dataclass
@@ -106,6 +111,7 @@ class ChatReply:
     prompt_tokens: int
     gen_tokens: int
     seconds: float
+    cut: bool = False       # stopped at max_tokens, so possibly unfinished
 
 
 class LocalChat:
@@ -150,7 +156,8 @@ class LocalChat:
         outs = self.llm.generate(prompts, params, use_tqdm=False)
         seconds = time.perf_counter() - t0
         return [ChatReply(o.outputs[0].text, len(o.prompt_token_ids),
-                          len(o.outputs[0].token_ids), seconds) for o in outs]
+                          len(o.outputs[0].token_ids), seconds,
+                          o.outputs[0].finish_reason == "length") for o in outs]
 
 
 class MockChat:
@@ -319,7 +326,9 @@ class SearchAgent:
             llm_seconds     float  time inside model calls (excludes tool time)
             llm_calls       int    model calls, one more than steps when the
                                    agent judges its last results
-            parse_failures  int    replies that were not usable JSON
+            parse_failures  int    replies that were not usable JSON; each is
+                                   asked for again, up to PARSE_RETRIES in a row
+            stop_reason     str    agent, step_limit, no_results or parse_failure
         """
         prompt = SYSTEM_PROMPT_TOOLS if len(self.tools) > 1 else SYSTEM_PROMPT
         if self.stop == "dry":
@@ -338,9 +347,12 @@ class SearchAgent:
         stats = {"steps": 0, "stopped_early": False, "gen_tokens": 0,
                  "prompt_tokens": 0, "llm_seconds": 0.0, "llm_calls": 0,
                  "parse_failures": 0, "keyword_searches": 0, "nudges": 0,
-                 "k_sum": 0}
+                 "k_sum": 0, "cut_replies": 0, "stop_reason": "", "bad_replies": []}
         dry = 0          # searches in a row whose results the agent kept none of
-        note = ""
+        note = ""        # shown above the results: a nudge or a retry request
+        counted = False  # the latest results already counted toward `dry`
+        nudged = False   # a stop was refused since the latest search
+        bad = 0          # unusable replies in a row
 
         while True:
             reply = yield [
@@ -351,33 +363,48 @@ class SearchAgent:
             stats["gen_tokens"] += reply.gen_tokens
             stats["prompt_tokens"] += reply.prompt_tokens
             stats["llm_seconds"] += reply.seconds
+            stats["cut_replies"] += reply.cut
 
             parsed = parse_reply(reply.text)
             if parsed is None:
+                # An unusable reply is not a request to stop: ask again.
                 stats["parse_failures"] += 1
-                parsed = {}
+                if len(stats["bad_replies"]) < 3:
+                    stats["bad_replies"].append(reply.text[:400])
+                if bad < PARSE_RETRIES:
+                    bad += 1
+                    note = RETRY_NOTE
+                    continue
+                stats["stop_reason"] = "parse_failure"
+                break
+            bad = 0
             keep = parsed.get("keep")
             before = len(kept)
             for i in keep if isinstance(keep, list) else []:
                 if isinstance(i, int) and 1 <= i <= len(results):
                     kept.add(results[i - 1]["id"])
-            if results and not note:     # a re-judged batch is not a new search
+            if results and not counted:  # a re-judged batch is not a new search
                 dry = dry + 1 if len(kept) == before else 0
+                counted = True
 
             next_search = parsed.get("next_search")
             if not isinstance(next_search, str) or not next_search.strip():
                 # A bad first reply must not end the run with nothing searched.
                 if stats["steps"] == 0:
                     next_search = query_text
-                elif self.stop == "dry" and dry < DRY_STREAK and not note:
+                elif self.stop == "dry" and dry < DRY_STREAK and not nudged:
                     note = NUDGE
+                    nudged = True
                     stats["nudges"] += 1
                     continue
                 else:
                     stats["stopped_early"] = True
+                    stats["stop_reason"] = "agent"
                     break
             note = ""
+            nudged = False
             if stats["steps"] >= self.max_steps:
+                stats["stop_reason"] = "step_limit"
                 break
 
             mode = parsed.get("search_type")
@@ -391,11 +418,13 @@ class SearchAgent:
             results = tool.search(next_search, k=k, exclude=seen, mode=mode)
             stats["k_sum"] += k or tool.k
             seen.update(r["id"] for r in results)
+            counted = False
             searches.append(f"[{mode}] {next_search}" if len(self.tools) > 1 else next_search)
             stats["keyword_searches"] += mode == "keyword"
             stats["steps"] += 1
             if not results:
                 stats["stopped_early"] = True
+                stats["stop_reason"] = "no_results"
                 break
 
         return kept, stats
@@ -421,6 +450,7 @@ def package(agent: SearchAgent, tool: RetrievalTool, query, matches: set[str],
             "parse_failures": float(stats.get("parse_failures", 0)),
             "keyword_searches": float(stats.get("keyword_searches", 0)),
             "nudges": float(stats.get("nudges", 0)),
+            "cut_replies": float(stats.get("cut_replies", 0)),
             # relevant documents the searches returned; tp is how many were kept
             "gold_seen": float(len(tool.returned & set(query.gold))),
             "mean_k": stats.get("k_sum", 0) / max(stats.get("steps", 0), 1),
@@ -433,6 +463,9 @@ def package(agent: SearchAgent, tool: RetrievalTool, query, matches: set[str],
             "k_max": agent.k_max,
             "snippet_chars": tool.snippet_chars,
             "stopped_early": bool(stats.get("stopped_early", False)),
+            "stop_reason": stats.get("stop_reason", ""),
+            # the first few unusable replies, to see what goes wrong
+            "bad_replies": stats.get("bad_replies", []),
         },
     )
 

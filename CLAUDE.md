@@ -88,8 +88,16 @@ MEMORY DISK`. `AVOID` is a regular expression on machine names to keep a job off
 - **vLLM crash on list-wise SYNERGY:** with prefix caching on, vLLM 0.6.3 hit a CUDA
   illegal memory access on review 8 (Jeyaraman_2020) three times, and with
   `PREFIX_CACHE=off` on review 9. All four ran on host gpu5000 (aliases
-  dbrundage-/zliu-chtcgpu5000); other work there is fine. Long list-wise jobs now
-  run one review per job with `AVOID=gpu5000`.
+  dbrundage-/zliu-chtcgpu5000). Run one review per job on other machines, it
+  crashed the same way on six reviews (Leenaars_2019, Leenaars_2020, Menon_2022,
+  Muthu_2021, Wassenaar_2017, Wolters_2018), so it is the prompts, not the host.
+  The list-wise SYNERGY result covers the other 20; untried fixes are
+  `enforce_eager` or a smaller `LISTWISE_GROUP`.
+- **Agent replies that are not JSON:** until Nov 8 an unusable reply had no
+  `next_search`, so it counted as a stop and often ended persistent, full-text and
+  choose-k runs early. Now it is asked for again (`PARSE_RETRIES`), and rows record
+  `stop_reason`, `n_cut_replies` and `bad_replies`. Those agents were rerun (jobs
+  12439148-58); the earlier files are in git history.
 - **Token budget:** `max_num_batched_tokens` defaults to 2048, which limits
   prefill-only work. The runner sets batch size x 512. Don't size it from
   `max_model_len`: at batch size 256 that means profiling a 524K-token step.

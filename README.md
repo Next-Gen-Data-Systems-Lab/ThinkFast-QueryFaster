@@ -81,10 +81,16 @@ built for yes/no decisions, because an agent cannot tell what it missed.
 
 ## Status
 
-- **Running:** the list-wise scan on SYNERGY reviews 8 to 26 (one job per review,
-  after a vLLM crash on long prompts), and Kev scanning all of arXiv at 1M.
-- **To do:** rehearse the talk; when the list-wise jobs finish, fill in the one
-  sentence marked TODO in the report; compile the report on Overleaf.
+- **Rerunning (Nov 8):** the newer agents (persistent, full text, choosing k, and
+  their combinations). An agent reply that was not valid JSON used to count as
+  a request to stop, which ended many of those runs early; it is now asked for
+  again. Findings 3 and 4 and the deck's agent slide will be updated from the
+  reruns. The plain 7B, 32B and keyword agents were barely affected (2-3 bad
+  replies in 60 runs).
+- **Running:** Kev scanning all of arXiv at 1M.
+- **To do:** rehearse the talk; compile the report on Overleaf.
+- **Known gap:** the list-wise scan covers 20 of the 26 SYNERGY reviews; vLLM
+  0.6.3 crashes on the long prompts of the other six.
 - **Not planned before Dec 7:** query rewriting, hosted Jev, corpora that change
   over time.
 

@@ -586,9 +586,13 @@ the pointwise scan, since both read every document once. Its recall is the same
 (0.34 against 0.31, $+0.03$\ci{-0.03}{0.08}), but it names 733 documents per
 query for 500 relevant ones, so precision falls from 0.76 to 0.25 and F1 by
 0.14\ci{0.09}{0.18}, worse on 19 of 20 queries. Only 20 of its 10,000 replies
-failed to parse. On the first 7 SYNERGY reviews the pattern is the same
-(precision 0.035).
-% TODO: replace with all 26 reviews when jobs 12439055-73 finish.
+failed to parse. On SYNERGY it ran on 20 of the 26 reviews (on the other six,
+vLLM 0.6.3 crashed with an illegal memory access on the long prompts, on several
+machines). It again reads as fast as the pointwise scan (119 against 114
+documents per second). It accepts more: recall 0.43 against 0.35
+($+0.09$\ci{0.00}{0.16}), but precision falls from 0.36 to 0.10 and F1 by
+0.18\ci{0.07}{0.26}. Accepting more is what a lower threshold does for the
+pointwise scan, which can choose that trade-off; the list-wise scan cannot.
 
 \subsection{Adaptive $k$ does not beat fixed $k$}
 \label{sec:adaptive}

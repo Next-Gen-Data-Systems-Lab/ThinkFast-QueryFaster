@@ -42,6 +42,7 @@ AGENTS = {
     "7B, full text": "results/synergy_agentfull.jsonl",
     "7B, chooses k": "results/synergy_agentk.jsonl",
     "7B, chooses k, persistent": "results/synergy_agentkdry.jsonl",
+    "7B, chooses k, persistent, full text": "results/synergy_agentkdryfull.jsonl",
 }
 
 

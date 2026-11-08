@@ -36,6 +36,7 @@ AGENT_STYLE = {   # marker, filled
     "7B, persistent": ("s", True),
     "7B, full text": ("^", True),
     "7B, chooses k": ("v", True), "7B, chooses k, persistent": ("v", False),
+    "7B, chooses k, persistent, full text": ("^", False),
 }
 # A slide has room for fewer markers: the reference agents and the strongest.
 SLIDE_AGENTS = ("7B, embeddings", "32B, embeddings", "7B, persistent", "7B, chooses k, persistent")

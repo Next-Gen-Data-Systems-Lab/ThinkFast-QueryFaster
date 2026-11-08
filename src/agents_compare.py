@@ -37,6 +37,7 @@ AGENTS = {
     # Chooses how many results each search returns (5 to 100).
     "7B, chooses k": "results/20newsgroups_agentk.jsonl",
     "7B, chooses k, persistent": "results/20newsgroups_agentkdry.jsonl",
+    "7B, chooses k, persistent, full text": "results/20newsgroups_agentkdryfull.jsonl",
 }
 SCANS = {   # scores file, and how to get documents per second at each N
     "qwen": ("results/20newsgroups_sweep_bs32.scores.jsonl", None),
