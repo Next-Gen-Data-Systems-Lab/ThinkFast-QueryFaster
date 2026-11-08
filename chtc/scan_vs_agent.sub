@@ -90,6 +90,11 @@ endif
 if !defined GPU
   GPU = A100|H200
 endif
+# Regular expression on machine names to keep a job off, e.g. a host whose GPU
+# crashed a run. The default matches no machine.
+if !defined AVOID
+  AVOID = ^$
+endif
 
 universe                = container
 container_image         = docker://vllm/vllm-openai:v0.6.3
@@ -127,7 +132,8 @@ requirements = (Target.CUDADriverVersion >= 12.1) && \
                (Target.GPUs_GlobalMemoryMb >= 40000) && \
                (Target.GPUs_Capability >= 8.0) && (Target.GPUs_Capability <= 9.0) && \
                !regexp("MIG", Target.GPUs_DeviceName) && \
-               regexp("$(GPU)", Target.GPUs_DeviceName)
+               regexp("$(GPU)", Target.GPUs_DeviceName) && \
+               !regexp("$(AVOID)", Target.Machine)
 
 +WantGPULab             = true
 +WantFlocking           = false

@@ -53,8 +53,8 @@ condor_submit BATCHES=32 TAG=name GPU='H200$' LENGTH=short chtc/scan_vs_agent.su
 ```
 
 Submit-time options: `DATASET MODEL SIZES BATCHES K TAG ARMS MAX_QUERIES
-AGENT_STEPS AGENT_CONCURRENCY AGENT_REPLICAS AGENT_TOOLS AGENT_STOP AGENT_SNIPPET AGENT_KMAX LISTWISE_GROUP MAX_CHARS GPU LENGTH
-MEMORY DISK`. Qwen2.5-32B needs `DISK=200GB MEMORY=96GB`. The default `GPU` is
+AGENT_STEPS AGENT_CONCURRENCY AGENT_REPLICAS AGENT_TOOLS AGENT_STOP AGENT_SNIPPET AGENT_KMAX LISTWISE_GROUP MAX_CHARS GPU AVOID LENGTH
+MEMORY DISK`. `AVOID` is a regular expression on machine names to keep a job off. Qwen2.5-32B needs `DISK=200GB MEMORY=96GB`. The default `GPU` is
 `A100|H200`, so pass `GPU='H200$'` for timings comparable with other runs.
 
 ## Things that have broken before
@@ -121,7 +121,8 @@ Overleaf (no LaTeX on this Mac or on CHTC). Keep its numbers in step with README
 Results and status are in the Status section of `README.md`. `results/README.md` maps
 each results file to its experiment, script and report table: add a row when a new
 TAG lands. Teammates read the repo too, so keep stray test outputs out of `results/`. The midterm deck is
-https://claude.ai/artifact/E1R5FHuvJHniGchsHttgeE (9 slides plus 4 backups, with
-timed speaker notes, about 7 minutes; updated Nov 7 with SYNERGY, arXiv, the
-stronger agents and the decision models). Its figure comes from
-`python -m src.paper_figs --slide`.
+https://claude.ai/artifact/E1R5FHuvJHniGchsHttgeE (10 slides plus 4 backups, with
+timed speaker notes, about 7.5 minutes; updated Nov 8 with the corrected headline,
+a decision-model scan beats every agent and zero-shot Qwen ties the strongest,
+and a slide on the freer agents). Its figure comes from
+`python -m src.paper_figs --slide`, which shows four agents (`SLIDE_AGENTS`).

@@ -106,12 +106,14 @@ questions).** On 20 Newsgroups 10K and SYNERGY, recall and seconds per query:
 
 | Jobs | What | Why |
 |---|---|---|
-| 12439001 | The list-wise scan on SYNERGY, resubmitted: job 12438054 hit a CUDA illegal memory access in vLLM after 7 reviews | Finishes finding 6 |
+| 12439020 | The list-wise scan on SYNERGY. Jobs 12438054 and 12439001 both hit a CUDA illegal memory access in vLLM on the 8th review, both on host dbrundage-chtcgpu5000; this run avoids that host (`AVOID=chtcgpu5000`) | Finishes finding 6 |
 | 12437632 | Kev scanning all of arXiv 1M | How complete an exhaustive scan gets at scale |
 
-**Next:** rewrite the deck's main-result slide and the report around findings 1
-and 6 (the deck still says every scan beats every agent), then rehearse for
-Nov 10. The midterm-era numbers (one query at a time, without equal time) are in
+**Next:** rehearse for Nov 10. The deck (main-result slide, a new slide on the
+agent variants, the summary) and the report (abstract, `tab:agents`, new
+`sec:freer`, arXiv in `sec:scale`, discussion, conclusion) now carry findings 1
+and 6. When 12439020 lands, replace the report's 7-review SYNERGY list-wise
+sentence (marked TODO in a comment). The midterm-era numbers (one query at a time, without equal time) are in
 the deck's backup slides and `python -m src.summarize_runs results`.
 
 ### Offline analysis of hybrid plans
@@ -626,8 +628,10 @@ The two contributions are adaptive k and the exchange rate.
       top 20K runs out. The report uses the same figure. `report/` stays
       the longer course report and still needs the new results.
 - [ ] Final report: draft in `report/report.tex` (LaTeX, compile on Overleaf).
-      All results are in, including JEV-9B, SYNERGY and arXiv scale (Table
-      `tab:scale`); no TODOs left. Not yet compiled. The story changes: low recall was
+      All results are in, including JEV-9B, SYNERGY, arXiv scale (Table
+      `tab:scale`), the persistent and freer agents and the list-wise scan
+      (`sec:freer`, Nov 8). One TODO comment: the SYNERGY list-wise sentence.
+      Not yet compiled. The story changes: low recall was
       mostly a Qwen problem, so the scan-against-agent result gets stronger with
       a real decision model, and the threshold finding becomes a zero-shot caveat.
 - [ ] Is the agent's early stopping a prompt problem? (submitted Nov 7, jobs
@@ -661,7 +665,8 @@ The two contributions are adaptive k and the exchange rate.
       (jobs 12438047-54, TAGs agentfull, agentk, agentkdry, listwise, on 20
       Newsgroups 10K and all of SYNERGY). Raised by Ayesha. Done except the
       SYNERGY list-wise scan, which crashed after 7 reviews (CUDA illegal memory
-      access in vLLM) and was resubmitted as 12439001. Results are finding 6 in
+      access in vLLM), twice on the same host, and was resubmitted as 12439020
+      on another host. Results are finding 6 in
       Status; `python -m src.agents_compare`, `src.synergy_compare` and
       `src.listwise_compare` print them.
       - `AGENT_SNIPPET=2000` (`--agent-snippet-chars`): the agent sees 2,000

@@ -37,11 +37,16 @@ We express an agent's cost as an \emph{exchange rate}: one step of a
 Qwen2.5-7B agent costs as much GPU time as 78 scan decisions when queries run one
 at a time, 11 when about 50 queries share the GPU, and a 32B agent's step costs
 160--230. Given exactly the agent's time on each query, a scan that visits
-documents in embedding order finds more answers than every agent we tried
-(7B and 32B, with and without keyword search) on both 20 Newsgroups and
-SYNERGY: at 10,000 documents 0.22 against 0.09 with the same 7B model, and up to
-0.67 with an open decision model. Batching makes the agent as cheap as the
-scan, but not more complete. Adding keyword search makes agents worse. BM25,
+documents in embedding order with an open decision model finds more answers
+than every agent we tried, on 20 Newsgroups, SYNERGY and arXiv. The plain 7B
+agent loses to every scan: at 10,000 documents it reaches recall 0.09, against
+0.22 for the zero-shot scan with the same model and 0.43 for Kev-9B. Told to keep
+searching and allowed to choose how many results to read, the agent reaches
+0.28, which ties the zero-shot scan at its default threshold but not Kev (0.71)
+or the zero-shot scan with a tuned threshold. It keeps only about a third of the
+relevant documents its searches return, the same share as the scan built on the
+same model. Batching makes the agent as cheap as the scan, but not more
+complete. Adding keyword search makes agents worse. BM25,
 embeddings and cross-encoder rerankers are far behind any LLM scan. Open
 decision models (Kev-9B, JEV-9B) beat the zero-shot scan on short topical and
 logical queries, but on long eligibility criteria the zero-shot instruction
@@ -86,9 +91,11 @@ contributions are:
   \item An equal-time comparison showing that a scan in embedding order beats
   the agent one query at a time, and that batched agents only tie it, at the
   agent's low recall (\S\ref{sec:equaltime}).
-  \item The same comparison against stronger agents, a 32B model and agents
-  with keyword search, and on a real find-all task: 26 systematic reviews
-  (\S\ref{sec:agents}, \S\ref{sec:synergy}).
+  \item The same comparison against stronger agents (a 32B model, keyword
+  search, a rule against stopping early, full text, and control over how many
+  results to read), against an LLM with no search tool, and on a real find-all
+  task: 26 systematic reviews (\S\ref{sec:agents}, \S\ref{sec:synergy},
+  \S\ref{sec:freer}).
   \item A negative result for adaptive $k$, framed as cost-based access-path
   selection, with an oracle bound on what any such rule could gain
   (\S\ref{sec:adaptive}).
@@ -147,6 +154,7 @@ datasets.
 \section{Methods}
 
 \subsection{Arms}
+\label{sec:arms}
 
 All arms return the set of documents they judge to match, and all are scored
 against the same complete answer set. Only the scan reads every document;
@@ -161,6 +169,7 @@ summarises them.
 Arm & What it does & Reads all? & Cost \\
 \midrule
 Scan & yes/no decision for every (query, document) pair, batched & yes & $O(N)$ prefills \\
+List-wise scan & 20 documents per prompt; the model names the matches & yes & $O(N/20)$ prompts \\
 Agent & LLM loop: search, read top 20, keep matches, search again or stop & no & serial steps \\
 Batched agent & many queries' agents interleaved on one GPU & no & cheaper steps \\
 ANN & top $k$ by embedding similarity, no LLM & no & index lookup \\
@@ -198,6 +207,26 @@ chosen per step: the reply names \texttt{"semantic"} or \texttt{"keyword"}, and
 the system prompt suggests keyword search for exact terms and names. And
 Qwen2.5-32B-Instruct replaces the 7B model as the agent. Crossing the two gives
 four agents, each run one query at a time with up to 64 steps.
+
+\paragraph{Freer agents.}
+Three further options test whether our agent design holds it back.
+\emph{Persistent}: the system prompt says answer sets can hold thousands of
+documents, and the agent may stop only after two searches in a row add nothing
+it keeps; an earlier stop is refused once with a note, a second refusal in a
+row ends the run, and it may take up to 256 steps. \emph{Full text}: results
+show 2,000 characters, the text the scan reads, instead of 300. \emph{Chooses
+$k$}: each reply sets how many results the next search returns, from 5 to 100,
+instead of a fixed 20. Agent rows also record how many relevant documents the
+searches returned, which separates what the agent never found from what it saw
+and rejected.
+
+\paragraph{List-wise scan.}
+An LLM with no search tool must still read the corpus, and once the corpus
+exceeds its context window it reads it in pieces. The list-wise scan puts 20
+documents per prompt, in embedding order, and asks for the numbers of those that
+match. It reads the same text as the scan and replays the same way, but it
+writes its answer instead of reading one token's probability, so it gives a
+yes or no with no score to threshold.
 
 \paragraph{Batched agent.}
 To give the agent the same batching advantage as the scan, the agent loop is
@@ -447,7 +476,8 @@ comparison for the four agents. The 32B agent with embedding search is the
 strongest (recall 0.17 at $N=10{,}000$, against 0.09 for 7B), but each of its
 steps takes about 1.4\,s against 0.45\,s, so one step buys $E \approx 230$ Qwen
 scan decisions, and the scan gains more from the extra time than the agent
-does. Every scan beats every agent, and every 95\% interval excludes zero.
+does. Every scan beats each of these four agents, and every 95\% interval
+excludes zero. Section~\ref{sec:freer} gives the agent more freedom.
 
 Keyword search does not help. Given BM25 as well as embedding search, the 7B
 agent uses it for 82\% of its searches at $N=10{,}000$ and searches twice as long
@@ -469,13 +499,18 @@ Agent & Agent & Qwen & Kev & JEV & Agent & Qwen & Kev & JEV \\
 32B & 0.17 & 0.29 & 0.68 & 0.57 & 0.21 & 0.32 & 0.62 & 0.40 \\
 32B + BM25 & 0.13 & 0.29 & 0.63 & 0.54 & 0.16 & 0.31 & 0.55 & 0.34 \\
 \midrule
-s per step, 7B / 32B & \multicolumn{4}{c}{0.40--0.45 / 1.36--1.52} & \multicolumn{4}{c}{0.44--0.46 / 1.47--1.54} \\
+7B, persistent & 0.22 & 0.29 & 0.65 & 0.55 & 0.26 & 0.31 & 0.52 & 0.33 \\
+7B, full text & 0.10 & 0.23 & 0.47 & 0.41 & 0.19 & 0.28 & 0.44 & 0.28 \\
+7B, chooses $k$ & 0.23 & 0.29 & 0.64 & 0.54 & 0.23 & 0.31 & 0.54 & 0.34 \\
+7B, chooses $k$, persistent & 0.28 & 0.30 & 0.71 & 0.59 & 0.29 & 0.31 & 0.55 & 0.35 \\
 \bottomrule
 \end{tabular}
 \caption{Recall of each agent, and of each scan model given that agent's
-seconds on each query, reading documents in embedding order ($t=0.5$). Kev is
-one query at a time here; with one pass for all 20 queries it reaches
-0.67--0.77 on 20 Newsgroups.}
+seconds on each query, reading documents in embedding order ($t=0.5$). The
+lower block is the 7B agent with the options of \S\ref{sec:freer}. Kev is one
+query at a time here; with one pass for all 20 queries it reaches 0.67--0.78 on
+20 Newsgroups. Steps take 0.40--0.67\,s for the 7B agents and 1.36--1.54\,s for
+32B.}
 \label{tab:agents}
 \end{table}
 
@@ -484,10 +519,11 @@ one query at a time here; with one pass for all 20 queries it reaches
 \includegraphics[width=\linewidth]{recall_time.pdf}
 \caption{Recall against seconds per query. Curves: each scan model reading
 documents in embedding order at its measured rate ($t=0.5$); dashed, Kev with
-one pass for all queries. Points: the four agents. On arXiv (100K papers,
-\S\ref{sec:scale}) only Qwen and the 7B agent were run, and the curve ends at
-140 seconds, where the classified top 20,000 runs out. Every agent lies below
-every scan curve.}
+one pass for all queries. Points: the agents of Table~\ref{tab:agents}. On
+arXiv (100K papers, \S\ref{sec:scale}) the Qwen curve ends at 140 seconds,
+where the classified top 20,000 runs out, and only the plain and persistent 7B
+agents were run. Every agent lies below every decision-model curve; the
+strongest agents reach the zero-shot Qwen curve.}
 \label{fig:time}
 \end{figure}
 
@@ -509,6 +545,50 @@ reaches 0.32 at precision 0.43, and Kev keeps 0.69 of the inclusions at precisio
 0.17, which for screening, where a missed study is the costly error, may be the
 more useful operating point. With keyword search the agents lose recall (7B:
 0.16 to 0.13; 32B: 0.21 to 0.16), using it for 55--90\% of their searches.
+
+\subsection{Freer agents, and an LLM without search}
+\label{sec:freer}
+
+The lower block of Table~\ref{tab:agents} gives the 7B agent the options of
+\S\ref{sec:arms} in turn, on 20 Newsgroups ($N=10{,}000$) and SYNERGY.
+
+\paragraph{Stopping was a large part of the problem.}
+Told to persist, the agent's recall rises from 0.09 to 0.22 on 20 Newsgroups
+(46 steps instead of 10, 20.6\,s instead of 5.0\,s), from 0.16 to 0.26 on
+SYNERGY, and from 0.05 to 0.18 on arXiv (\S\ref{sec:scale}). It still stops by
+choice on every query, after about one refused stop on average.
+
+\paragraph{Snippet length was not.}
+Full text adds 0.01 recall on 20 Newsgroups and 0.03 on SYNERGY, at 1.5 times
+the seconds.
+
+\paragraph{Choosing $k$ is the largest single gain.}
+The agent asks for about 47 results per search instead of 20 and, on SYNERGY,
+reads 1,065 records per review instead of 219. Recall rises to 0.23 on both
+datasets, at 3 to 4 times the seconds; precision on SYNERGY falls from 0.34 to
+0.19. With persistence as well it reaches 0.28 and 0.29 in 33\,s and 21\,s, the
+strongest agents we ran. In their time the zero-shot scan at $t=0.5$ only ties
+them ($+0.02$\ci{-0.05}{0.10} on 20 Newsgroups, $+0.03$\ci{-0.05}{0.11} on
+SYNERGY), but Kev still wins ($+0.43$\ci{0.37}{0.48} and $+0.27$\ci{0.16}{0.38}),
+and so does the zero-shot scan with the threshold chosen on the other queries
+($+0.32$\ci{0.27}{0.38} and $+0.13$\ci{0.04}{0.23}).
+
+\paragraph{Judgment, not search, caps the agent.}
+Of the relevant documents its searches return, the agent keeps 36--38\% on 20
+Newsgroups and 20--41\% on SYNERGY. The scan built on the same model keeps 31\%
+and 32\% at $t=0.5$. Searching longer or wider shows the agent more relevant
+documents, but its decisions are no more generous than the zero-shot scan's,
+and unlike the scan's they have no threshold to lower.
+
+\paragraph{An LLM without search is a slower, less precise scan.}
+On 20 Newsgroups the list-wise scan reads 170 documents per second, the same as
+the pointwise scan, since both read every document once. Its recall is the same
+(0.34 against 0.31, $+0.03$\ci{-0.03}{0.08}), but it names 733 documents per
+query for 500 relevant ones, so precision falls from 0.76 to 0.25 and F1 by
+0.14\ci{0.09}{0.18}, worse on 19 of 20 queries. Only 20 of its 10,000 replies
+failed to parse. On the first 7 SYNERGY reviews the pattern is the same
+(precision 0.035).
+% TODO: replace with all 26 reviews when job 12439020 finishes.
 
 \subsection{Adaptive $k$ does not beat fixed $k$}
 \label{sec:adaptive}
@@ -793,6 +873,19 @@ to 0.75. But it stops long before the answer set is exhausted: at a million
 documents it reports a median of 51 papers for queries with thousands of
 answers.
 
+\paragraph{A persistent agent and a decision model at 100K.}
+Told to persist, the 7B agent at $N=100{,}000$ takes 44 steps and 30\,s and
+reaches recall 0.18 (224 relevant papers found, against 44). In its time the
+zero-shot scan at $t=0.5$ ties it (0.15, $-0.03$\ci{-0.08}{0.02}), and with the
+tuned threshold wins ($+0.36$\ci{0.30}{0.42}). Kev scanned the whole 100K sample
+with all 20 queries in one pass (66 minutes, 550 documents per second per
+query), reaching recall 0.90 at precision 0.32 ($t=0.5$; best F1 0.59 at
+$t=0.9$). In the agents' time it wins on all 20 queries: $+0.61$\ci{0.54}{0.68}
+against the plain agent and $+0.68$\ci{0.64}{0.73} against the persistent one.
+One query at a time, at a rate estimated from 20 Newsgroups' ratio of separate to
+packed throughput (123 documents per second), it still wins by $+0.29$ and
+$+0.52$.
+
 \paragraph{Calibration decides the small corpus.}
 At $t=0.5$ the zero-shot scan is as conservative as on 20 Newsgroups
 (\S\ref{sec:decision}): even the full 10K scan reaches recall 0.16, below the
@@ -834,22 +927,25 @@ The agent and the hybrid are not exhaustive and are not meant to be. Every arm
 is scored against the full answer set, so a missed document always counts as
 lost recall, and arms are compared at equal cost rather than equal effort.
 We also gave the agent the strongest upgrades we could run: keyword search as a
-second tool, and a model four times larger. Neither closes the gap, and keyword
-search makes it wider. Other tools (metadata filters, or a tool that runs the
+second tool, a model four times larger, a rule against stopping early, full
+text, and control over how many results each search returns. Persistence and
+control over $k$ help most, and together bring the agent level with the
+zero-shot scan at its default threshold, but no agent comes near a
+decision-model scan, and keyword search makes the gap wider. Other tools (metadata filters, or a tool that runs the
 classifier on a batch) remain untested; the second is a hybrid in agent form.
 
 \paragraph{Limitations.}
 Two agent models really search (Qwen2.5-7B and 32B); smaller agents barely
-search. All agents share one design: snippets of the top 20 results and a JSON
-reply. 20 Newsgroups has 20 category queries with large answer sets, the logic
+search. All agents share one design: a JSON reply naming the results to keep,
+over search results shown as snippets. 20 Newsgroups has 20 category queries with large answer sets, the logic
 set has only 4--10 queries per shape, and SYNERGY has 26 reviews of very
 different sizes. SYNERGY inclusions were decided on full text, which caps every
 arm working from titles and abstracts. All timing is on one GPU type. Kev and
 JEV-9B use a different and larger backbone than Qwen, so the decision-model
 results compare models, not only architectures. Packed throughput depends on
 how many queries share a pass. NFCorpus judgments are incomplete, so its recall
-numbers are a lower bound on quality. On arXiv only the 7B agent and the Qwen
-scan were run, the scan's ranking beyond the top 20,000 is not classified, and
+numbers are a lower bound on quality. On arXiv only the Qwen scan, Kev (at
+100K) and the plain and persistent 7B agents were run, the scan's ranking beyond the top 20,000 is not classified, and
 a category label is a proxy for relevance: a paper about a topic may be filed
 elsewhere.
 
@@ -865,9 +961,13 @@ while an index amortises.
 
 For find-all queries, scanning beats searching whenever an agent step costs
 more than about a dozen classifier decisions. On one GPU, one query at a time, a
-step costs 48--230 of them, depending on the agent and the corpus, and the scan
-in embedding order beat every agent we tried on both 20 Newsgroups and 26 real
-systematic reviews. Batching agents closes the cost gap but not the recall gap;
+step costs 48--230 of them, depending on the agent and the corpus. A scan in
+embedding order with an open decision model beat every agent we tried, on 20
+Newsgroups, 26 real systematic reviews and arXiv. A zero-shot scan at its
+default threshold ties the strongest agents, which persist and choose how much
+to read, and beats them once its threshold is tuned. Agents fall short for two
+reasons: they stop by choice, and they keep only about a third of the relevant
+documents they see, no more than the scan built on the same model. Batching agents closes the cost gap but not the recall gap;
 a larger agent costs more than it gains; keyword search hurts. Choosing scan
 depth per query buys little over a fixed depth. Cheap scorers are no substitute
 for an LLM, and the scan's weakness in our first experiments, low recall from a
@@ -880,8 +980,9 @@ relevant papers found grows with the corpus.
 \paragraph{Reproducibility.}
 Code, submit files, raw rows and per-document scores are in the project
 repository. \texttt{src.access\_paths}, \texttt{src.crossover},
-\texttt{src.kev\_compare}, \texttt{src.baselines}, \texttt{src.agents\_compare}
-and \texttt{src.synergy\_compare} regenerate every replayed number from the saved
+\texttt{src.kev\_compare}, \texttt{src.baselines}, \texttt{src.agents\_compare},
+\texttt{src.synergy\_compare}, \texttt{src.listwise\_compare} and
+\texttt{src.scale\_compare} regenerate every replayed number from the saved
 scores without a GPU; \texttt{src.synergy\_build} rebuilds the SYNERGY texts.
 
 \bibliographystyle{plainnat}
