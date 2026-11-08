@@ -12,8 +12,10 @@ sets:
 | Arm | What it does | Reads every document? | Cost shape |
 |---|---|---|---|
 | `classify` (the scan) | one yes/no forward pass per (query, document) pair, batched | yes | `O(N)` calls, parallel |
-| `classify` with Kev-9B (`src/kev_scan.py`) | the same scan with an open Jev-like decision model | yes | `O(N)`, one pass per document can answer every query |
-| `agent` | LLM search loop: write a query, get the top 20 unseen documents, keep matches, search again or stop. `--agent-tools semantic,keyword` adds BM25 search as a second tool | no | serial in steps |
+| `classify` with Kev-9B or JEV-9B (`src/kev_scan.py`, `src/jev_scan.py`) | the same scan with an open Jev-like decision model | yes | `O(N)`; Kev's packed mode answers every query in one pass per document |
+| `classify` with a reranker (`src/rerank_scan.py`) | the same scan with a cross-encoder (bge, MiniLM), as a cheap baseline | yes | `O(N)`, about 10x faster |
+| `listwise` (`src/arms/listwise.py`) | 20 documents per prompt, the model names the matches: an LLM "without tools" | yes | `O(N/20)` calls, each long |
+| `agent` | LLM search loop: write a query, get the top 20 unseen documents, keep matches, search again or stop. Options: BM25 as a second tool, a persistent stop rule, longer snippets, choosing k | no | serial in steps |
 | `agent`, batched (`--agent-concurrency`) | the same agent, many queries in flight on one GPU | no | cheaper per step, slower per query |
 | `ann` | top-k by embedding similarity, no LLM | no | `O(log N)`, no model calls |
 | `hybrid` | top-k by embedding, then classify those k | no (yes at k = N) | `O(k)` calls |
@@ -27,43 +29,62 @@ adaptive k work tested rules for choosing that stopping point per query.
 
 ## Status
 
-*Last updated Nov 7, 2026. Measured on one H200 with Qwen2.5-7B, plus Kev-9B as a second scan.*
+*Last updated Nov 7, 2026. One H200; Qwen2.5-7B is both scan and agent unless
+noted. Every number below has a 95% interval and a script in the "Before the
+final report" checklist; `results/README.md` says which file backs which result.*
 
-All four arms run on CHTC, including a measured search agent. Results are in
-`results/`, and `python -m src.summarize_runs results` prints the numbers.
+### What we found
 
-| N | Scan recall | Scan s/query | Agent recall | Agent s/query |
-|---:|---:|---:|---:|---:|
-| 1,000 | 0.29 | 5.8 | 0.23 | 2.1 |
-| 5,000 | 0.31 | 29 | 0.14 | 4.6 |
-| 10,000 | 0.31 | 60 | 0.09 | 5.0 |
+**1. At equal time, a scan with an open decision model beats every agent; a
+zero-shot scan only ties an agent told to keep searching.** Each agent's
+seconds on each query are given to a scan reading documents in embedding order.
+Recall:
 
-Scan is at batch size 32 and threshold 0.5. The agent is allowed 64 steps.
-Precision is similar for both, 0.68-0.76.
+| | 7B agent | Persistent 7B agent | Qwen scan, same time | Kev scan, same time |
+|---|---:|---:|---:|---:|
+| 20 Newsgroups, 10K | 0.087 | 0.224 | 0.292 (+0.07, just significant) | 0.654 |
+| SYNERGY, 26 reviews | 0.159 | 0.257 | 0.305 (+0.05, a tie) | 0.518 |
+| arXiv, 100K | 0.046 | 0.176 | 0.145 (-0.03, a tie) | 0.69 (one query at a time, estimated) |
 
-- **Throughput:** levels off at batch size 32, about 170 documents per second.
-- **Agent stopping:** extra budget doesn't help. At N = 10,000 it stops by choice
-  after about 10 steps, with 44 of 500 relevant documents found.
-- **Exchange rate:** one agent step costs about 78 scan decisions (0.46 s of wall
-  time at 170 documents per second), falling to about 11 when calls are batched.
-- **Limits:** the scan's lead mostly disappears on NFCorpus, where hybrid has the
-  best F1. Qwen 1.5B scans about 2.4x faster but ranks much worse.
-- **A purpose-built classifier fixes most of the scan's recall problem.** Kev-9B
-  as the scan reaches recall 0.78 at t = 0.5 on 20 Newsgroups (Qwen 0.31) and
-  F1 0.64 (Qwen 0.42). Packing all 20 queries into one pass per document scores
-  540 documents per second per query. See [Kev-9B as the scan](#kev-9b-as-the-scan).
-- **Scale (arXiv, 10K to 1M papers):** the agent's effort barely grows with the
-  corpus (7 to 12 steps, 143 to 239 papers read, always stopping by choice)
-  while answer sets grow a hundredfold, so its recall falls from 0.19 to 0.008.
-  At equal time and with a held-out threshold, the scan finds 89 / 384 / 646
-  relevant papers per query against the agent's 22 / 44 / 68, better on 20 of
-  20 queries at every size. At t = 0.5 the two tie at 10K. See the arXiv item
-  under [Before the final report](#before-the-final-report-dec-7).
+The "same time" columns are measured against the persistent agent; against the
+plain 7B agent every scan wins. Zero-shot Qwen is the weak scan because it is
+badly calibrated: on topic queries the best threshold is about 1e-8, not 0.5.
+With a threshold tuned on the other queries (1e-8 on 20 Newsgroups and arXiv,
+0.03 on SYNERGY) it beats the persistent agent everywhere: +0.35, +0.15 and
++0.36 recall, all intervals above zero.
 
-**Next:** rehearse the midterm talk (Nov 10; the deck was updated Nov 7 with
-all results), and finish the two experiments under
-[Before the final report](#before-the-final-report-dec-7): a persistent agent,
-and Kev scanning arXiv at 100K and 1M.
+**2. Agents stop by choice, and their effort does not grow with the answer
+set.** With 64 steps allowed, the 7B agent stops after about 10. On arXiv, from
+10K to 1M papers, answer sets grow 100x and the agent reads 143 to 239 papers.
+Telling it answer sets can be large, and refusing a stop while its searches
+still find matches, raises its recall 1.6 to 3.8x, at 3 to 5 times the time.
+
+**3. The exchange rate.** One agent step costs as much GPU time as 48 to 230
+scan decisions (78 for the 7B agent on 20 Newsgroups; 11 when about 50 agents
+share the GPU, which is break-even, at the agent's low recall and about 100 s
+latency). A 32B agent costs more than it gains; BM25 as a second tool hurts.
+
+**4. Which model should scan.** Kev-9B and JEV-9B beat zero-shot Qwen on short
+queries (F1 on 20 Newsgroups 0.65 and 0.63 against 0.58; on logical queries 0.77
+and 0.79 against 0.58) but not on long eligibility criteria (SYNERGY 0.22 and
+0.25 against 0.32). BM25, embeddings and cross-encoder rerankers trail the LLM
+scans almost everywhere.
+
+**5. Choosing scan depth per query does not beat a fixed depth;** an oracle adds
+at most 0.07 recall (a negative result, kept in the report).
+
+### Running (submitted Nov 7)
+
+| Jobs | What | Why |
+|---|---|---|
+| 12438047-54 | On 20 Newsgroups 10K and SYNERGY: agent seeing full text (2,000 characters, as the scan does, not 300); agent choosing k, with and without the persistent rule; the list-wise scan | Ayesha's questions: is the agent handicapped, and what does an LLM without search tools amount to |
+| 12437632 | Kev scanning all of arXiv 1M | How complete an exhaustive scan gets at scale |
+
+**Next:** when these land, rewrite the deck's main-result slide and the report
+around finding 1 as stated above (the deck still says every scan beats every
+agent), then rehearse for Nov 10. The midterm-era numbers (one query at a time,
+without equal time) are in the deck's backup slides and
+`python -m src.summarize_runs results`.
 
 ### Offline analysis of hybrid plans
 
