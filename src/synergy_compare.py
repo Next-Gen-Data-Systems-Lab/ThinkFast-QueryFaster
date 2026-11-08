@@ -39,6 +39,9 @@ AGENTS = {
     "32B, embeddings": "results/synergy_agent32b1t.jsonl",
     "32B, embeddings + BM25": "results/synergy_agent32b2t.jsonl",
     "7B, persistent": "results/synergy_agentdry.jsonl",
+    "7B, full text": "results/synergy_agentfull.jsonl",
+    "7B, chooses k": "results/synergy_agentk.jsonl",
+    "7B, chooses k, persistent": "results/synergy_agentkdry.jsonl",
 }
 
 
@@ -119,6 +122,11 @@ def analyse(c: dict) -> dict:
                  "steps": float(np.mean([r.n_steps for r in rs])),
                  "docs_seen": float(np.mean([r.n_docs_scored for r in rs])),
                  "s_per_call": tau, "equal_time": {}}
+        if "n_gold_seen" in rs[0]:
+            seen = np.array([r.n_gold_seen for r in rs])
+            entry["gold_seen"] = float(seen.mean())
+            entry["kept_of_seen"] = float(sum(r.tp for r in rs) / max(seen.sum(), 1))
+            entry["mean_k"] = float(np.mean([r.n_mean_k for r in rs]))
         if "n_nudges" in rs[0]:
             entry["nudges"] = float(np.mean([r.n_nudges for r in rs]))
             entry["hit_step_limit"] = int(sum(not bool(r.stopped_early) for r in rs))
@@ -158,7 +166,9 @@ def show(r: dict) -> None:
         print(f"\n  agent {a}: R {e['recall']:.3f} P {e['precision']:.3f} F1 {e['f1']:.3f} "
               f"{e['seconds']:.1f}s {e['steps']:.1f} steps, {e['docs_seen']:.0f} docs seen, "
               f"{e['s_per_call']:.3f} s/call"
-              + (f", keyword share {e['keyword_share']:.2f}" if "keyword_share" in e else ""))
+              + (f", keyword share {e['keyword_share']:.2f}" if "keyword_share" in e else "")
+              + (f", k {e['mean_k']:.0f}, kept {e['kept_of_seen']:.0%} of "
+                 f"{e['gold_seen']:.1f} relevant seen" if "kept_of_seen" in e else ""))
         for m, x in e["equal_time"].items():
             print(f"    {m:4s} same time: {x['share_of_pool']:.0%} of pool, R {x['recall']:.3f}, "
                   f"vs agent {ci(x['vs_agent'])}; exchange rate {e['exchange_rate'][m]:.0f}")

@@ -34,6 +34,8 @@ AGENT_STYLE = {   # marker, filled
     "7B, embeddings": ("o", True), "7B, embeddings + BM25": ("o", False),
     "32B, embeddings": ("D", True), "32B, embeddings + BM25": ("D", False),
     "7B, persistent": ("s", True),
+    "7B, full text": ("^", True),
+    "7B, chooses k": ("v", True), "7B, chooses k, persistent": ("v", False),
 }
 
 
@@ -105,6 +107,15 @@ def panel_arxiv(n: int = 1_000_000) -> tuple[str, dict, dict] | None:
     # rather than going flat as if the scan had nothing more to find.
     y[GRID * rate > int(h.k.iloc[0])] = np.nan
     curves = {"Qwen 7B": y}
+    # Kev scanned all of the 100K sample with every query in one pass, so its
+    # curve is the packed (dashed) one, at its measured rate per query.
+    kev_rows, kev_scores = "results/arxiv_kev9b_packed.jsonl", "results/arxiv_kev9b_packed.scores.jsonl"
+    if n == 100_000 and Path(kev_rows).exists() and Path(kev_scores).exists():
+        with open(kev_rows) as fh:
+            k = pd.DataFrame(json.loads(line) for line in fh if line.strip())
+        k = k[k.corpus_size == n].drop_duplicates("query_id", keep="last")
+        kq = AP.load("arxiv", n, kev_scores)
+        curves["Kev-9B, packed"] = curve(kq, [n * len(k) / k.t_total.sum()] * len(kq))
     size = f"{n // 1_000_000}M" if n >= 1_000_000 else f"{n // 1000}K"
     return f"arXiv, {size}", curves, agent_points(
         {"7B, embeddings": rows, "7B, persistent": "results/arxiv_agentdry.jsonl"}, n=n)
@@ -115,19 +126,19 @@ def figure(out: Path, arxiv_n: int = 100_000, panel_width: float = 3.4,
     panels = [p for p in (panel_20ng(), panel_synergy(), panel_arxiv(arxiv_n)) if p]
     fig, axes = plt.subplots(1, len(panels), figsize=(panel_width * len(panels), height), sharey=True)
     axes = np.atleast_1d(axes)
-    for ax, (title, curves, agents) in zip(axes, panels):
+    for i, (ax, (title, curves, agents)) in enumerate(zip(axes, panels)):
         for name, y in curves.items():
             base = name.replace(", packed", "")
             ax.plot(GRID, y, color=COLOR[base], linewidth=1.8,
                     linestyle="--" if "packed" in name else "-")
-            if "packed" in name and dashed_note:
+            if "packed" in name and dashed_note and i == 0:
                 # Ends where the separate curve ends, so label it in the empty
                 # lower right, below the plateaus and right of the agents.
                 ax.text(GRID[-1], 0.04, "dashed: Kev, one\npass for all queries",
                         ha="right", va="bottom", fontsize=7.5, color=INK)
-            elif "packed" not in name:
+            elif "packed" not in name or base not in curves:
                 last = np.flatnonzero(np.isfinite(y))[-1]
-                ax.annotate(name.replace("-9B", "").replace(" 7B", ""), (GRID[last], y[last]),
+                ax.annotate(base.replace("-9B", "").replace(" 7B", ""), (GRID[last], y[last]),
                             xytext=(3, 0), textcoords="offset points", va="center",
                             fontsize=7.5, color=INK)
         for name, (secs, rec) in agents.items():
@@ -142,14 +153,15 @@ def figure(out: Path, arxiv_n: int = 100_000, panel_width: float = 3.4,
         ax.set_xlabel("Seconds per query", fontsize=8.5, color="#4A5564")
         style(ax)
     axes[0].set_ylabel("Recall", fontsize=8.5, color="#4A5564")
-    axes[0].set_ylim(0, 0.85)
+    axes[0].set_ylim(0, 0.95)
     handles, labels = [], []
     for ax in axes:
         for h, l in zip(*ax.get_legend_handles_labels()):
             if l not in labels:
                 handles.append(h)
                 labels.append(l)
-    fig.legend(handles, labels, frameon=False, fontsize=7.5, ncol=4, loc="lower center")
+    fig.legend(handles, labels, frameon=False, fontsize=7.5, ncol=min(len(labels), 5),
+               loc="lower center")
     fig.tight_layout(rect=(0, 0.1, 1, 1))
     out.mkdir(parents=True, exist_ok=True)
     fig.savefig(out / "recall_time.pdf")

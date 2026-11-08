@@ -414,7 +414,6 @@ chtc/                      each .sub has a matching run_<name>.sh
   kev_scan.sub             scan with Kev-9B (src.kev_scan), pinned Kev commit
   jev_rerank_scan.sub      scan with JEV-9B or a reranker (src.jev_scan,
                            src.rerank_scan), Python 3.12 environment
-  jev_scan_old.sub         the first JEV-only job, replaced by jev_rerank_scan
   upload.sh                copies the project to the access point
 report/                    the course report (LaTeX, compile on Overleaf)
 paper/                     the short paper draft (paused)
@@ -592,6 +591,49 @@ The two contributions are adaptive k and the exchange rate.
       Newsgroups 10K, all 26 SYNERGY reviews and arXiv 100K.
       `src.agents_compare`, `src.synergy_compare` and `src.scale_compare` pick it
       up as "7B, persistent", and `paper_figs` draws it as a square.
+
+      **20 Newsgroups 10K (job 12437628, done):** stopping was a large part of
+      the agent's problem. Recall rises from 0.087 to 0.224 (best of all agents;
+      32B reached 0.17), with 46 steps instead of 10, 922 documents read instead
+      of 198, and 20.6 s instead of 5.0 s. It still stopped by choice on all 20
+      queries (at most 132 steps), after 1.1 refused stops on average. In its
+      time the scan still wins: Qwen 0.292 (+0.068, 95% interval [+0.010,
+      +0.138], the narrowest margin of any agent), Kev 0.654, JEV 0.553.
+
+      **SYNERGY and arXiv 100K (jobs 12437629-30, done):** the persistent agent
+      ties the zero-shot scan at t = 0.5. SYNERGY: agent recall 0.257 (was
+      0.159), Qwen in the same time 0.305, +0.048 [-0.017, +0.113]; JEV +0.074
+      [-0.002, +0.154]; Kev still wins, +0.261 [+0.157, +0.350]. arXiv 100K: agent
+      0.176 (was 0.046), Qwen at t = 0.5 0.145, -0.031 [-0.079, +0.020]; with the
+      held-out threshold the scan wins, +0.362 [+0.302, +0.423]. So "every scan
+      beats every agent" holds only for a decision model or a calibrated
+      threshold once the agent is told to persist.
+- [ ] Is the agent handicapped, and does a scan need one document per prompt?
+      (submitted Nov 7, TAGs agentfull, agentk, agentkdry, listwise, on 20
+      Newsgroups 10K and all of SYNERGY). Raised by Ayesha.
+      - `AGENT_SNIPPET=2000` (`--agent-snippet-chars`): the agent sees 2,000
+        characters of each result, the text the scan sees, instead of 300.
+      - `AGENT_KMAX=100` (`--agent-k-max`): the agent picks how many results each
+        search returns, 5 to 100, instead of a fixed 20; `agentkdry` adds the
+        persistent stop rule.
+      - `ARMS=listwise` (`src/arms/listwise.py`, `--listwise-group`): what an LLM
+        without search tools amounts to once the corpus is larger than its
+        context. Each prompt holds 20 documents in embedding order and the model
+        names the matches. Scores are saved as 0/1, so it replays like the
+        pointwise scan; `python -m src.listwise_compare` compares the two and
+        both against the agents at equal time.
+      - Every agent row now records `n_gold_seen` (relevant documents its
+        searches returned; `tp` is how many it kept) and `n_mean_k`. Prompts that
+        would overflow the context are cut from the end and counted in
+        `n_truncated_prompts`. The runner sizes `max_model_len` for long prompts.
+- [x] Kev at arXiv 100K (job 12437631, 66 min, packed: one pass answers all 20
+      queries, 550 documents per second per query). Whole corpus at t = 0.5:
+      recall 0.90, precision 0.32 (Kev errs toward yes here; best F1 0.59 at
+      t = 0.9). In the agents' time it wins on 20 of 20 queries: against the 7B
+      agent +0.612 [+0.535, +0.680], against the persistent agent +0.684 [+0.638,
+      +0.730]. One query at a time (rate estimated at 123 documents per second
+      from the 20 Newsgroups ratio of separate to packed) it still wins: +0.293
+      and +0.516 at t = 0.5. The scores file is 80 MB, under GitHub's limit.
 - [ ] Kev at scale (submitted Nov 7): packed scans of arXiv at 100K (job
       12437631, TAG kev9b, about 1 h) and 1M (12437632, TAG kev9b1m, about 10 h at
       the 27 documents per second packed rate seen on 20 Newsgroups). A full 1M
@@ -599,8 +641,9 @@ The two contributions are adaptive k and the exchange rate.
       exhaustive scan gets where the agent reaches 0.008. The job builds the
       arXiv sample itself; `run_kev_scan.sh` adds pyarrow to Kev's environment for it.
 - [ ] Job files were renamed on Nov 7 (`midterm.sub` to `scan_vs_agent.sub`,
-      `kev.sub` to `kev_scan.sub`, `scan.sub` to `jev_rerank_scan.sub`, `jev.sub` to
-      `jev_scan_old.sub`, each with its `run_*.sh`). The old copies stay on the
+      `kev.sub` to `kev_scan.sub`, `scan.sub` to `jev_rerank_scan.sub`, each with its
+      `run_*.sh`). `jev.sub` was removed: `jev_rerank_scan.sub` runs the same pinned
+      environment and `src.jev_scan`, so it reproduces that job's results exactly. The old copies stay on the
       access point until jobs 12437629-32 have started, because a queued job reads
       its script when it starts; delete them after that.
 

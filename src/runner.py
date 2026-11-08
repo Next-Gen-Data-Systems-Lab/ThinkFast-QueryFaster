@@ -38,6 +38,7 @@ from .arms import agent as AG
 from .arms import ann as ANN
 from .arms import classify as CLS
 from .arms import keyword as KW
+from .arms import listwise as LW
 
 # Every request is prefill only (max_tokens=1), so vLLM's per-step token budget
 # caps the real batch, not max_num_seqs. Its 2048-token default fits about 7 of
@@ -126,6 +127,14 @@ def main(argv=None):
                         "answer sets can be large")
     p.add_argument("--agent-k", type=int, default=20,
                    help="documents the agent sees per search")
+    p.add_argument("--agent-k-max", type=int, default=0,
+                   help="0 = every search returns --agent-k results; otherwise the "
+                        "agent chooses k per search, from 5 to this")
+    p.add_argument("--agent-snippet-chars", type=int, default=300,
+                   help="characters of each result the agent sees; the scan sees "
+                        "--max-chars")
+    p.add_argument("--listwise-group", type=int, default=20,
+                   help="documents per prompt for the listwise arm")
     p.add_argument("--agent-max-steps", type=int, default=8,
                    help="hard cap on agent search iterations")
     p.add_argument("--agent-concurrency", default="",
@@ -161,6 +170,16 @@ def main(argv=None):
         long_query = any(n.startswith("synergy") for n in D.expand(args.dataset))
         args.max_model_len = (8192 if args.max_chars > 2000 or long_query
                               else 4096 if "agent" in arms else 2048)
+        # Prompts that list many documents need more room: about 2,000 tokens of
+        # instructions, plus documents at a conservative 2.5 characters per token.
+        listed = []
+        if "agent" in arms:
+            listed.append((args.agent_k_max or args.agent_k) * args.agent_snippet_chars)
+        if "listwise" in arms:
+            listed.append(args.listwise_group * args.max_chars)
+        need = 2048 + int(max(listed, default=0) / 2.5)
+        while args.max_model_len < min(need, 32768):
+            args.max_model_len *= 2
     sizes = [int(x) for x in args.corpus_sizes.split(",") if x.strip()]
     batches = [int(x) for x in args.batch_sizes.split(",") if x.strip()]
     concurrency = [int(x) for x in args.agent_concurrency.split(",") if x.strip()]
@@ -187,8 +206,8 @@ def main(argv=None):
 
     writer = Writer(out)
     score_writer = Writer(Path(args.scores_out)) if args.scores_out else None
-    needs_model = {"classify", "hybrid", "agent"} & set(arms)
-    needs_index = {"ann", "hybrid", "agent"} & set(arms)
+    needs_model = {"classify", "hybrid", "agent", "listwise"} & set(arms)
+    needs_index = {"ann", "hybrid", "agent", "listwise"} & set(arms)
 
     try:
         for bs in batches:
@@ -232,12 +251,12 @@ def main(argv=None):
                     print(f"[runner] n={len(sub.docs)} index built in {bs_s:.1f}s",
                           flush=True)
 
-                agent = tool = None
+                agent = tool = chat = None
                 if "agent" in arms:
                     tools = tuple(x.strip() for x in args.agent_tools.split(",") if x.strip())
                     agent = AG.SearchAgent(AG.build_chat(model), args.model,
                                            max_steps=args.agent_max_steps, tools=tools,
-                                           stop=args.agent_stop)
+                                           stop=args.agent_stop, k_max=args.agent_k_max)
                     keyword = None
                     if "keyword" in tools:
                         keyword = KW.KeywordIndex()
@@ -245,6 +264,7 @@ def main(argv=None):
                         print(f"[runner] n={len(sub.docs)} keyword index built in "
                               f"{kw_s:.1f}s", flush=True)
                     tool = AG.RetrievalTool(index, docs_by_id, k=args.agent_k,
+                                            snippet_chars=args.agent_snippet_chars,
                                             keyword=keyword)
 
                 for arm in arms:
@@ -261,6 +281,7 @@ def main(argv=None):
                             rs, batch = AG.run_many(
                                 agent, lambda: AG.RetrievalTool(
                                     index, docs_by_id, k=args.agent_k,
+                                    snippet_chars=args.agent_snippet_chars,
                                     keyword=keyword), todo, c)
                             calls = sum(r.counts["llm_calls"] for r in rs)
                             for r in rs:
@@ -296,6 +317,10 @@ def main(argv=None):
                                                args.k, args.threshold)
                         elif arm == "agent":
                             r = AG.run(agent, tool, q)
+                        elif arm == "listwise":
+                            if chat is None:
+                                chat = AG.build_chat(model)
+                            r = LW.run(chat, index, q, sub.docs, args.listwise_group)
                         else:
                             raise ValueError(f"unknown arm {arm!r}")
                         row = {**base, "k": kk, **M.flatten(r, q.gold)}

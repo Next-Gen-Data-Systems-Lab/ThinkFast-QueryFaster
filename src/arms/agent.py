@@ -91,6 +91,12 @@ NUDGE = ("You asked to stop, but your recent searches still found matching docum
          "so there are probably more. Write a new search query.")
 # Only the latest searches are listed, so a long run's prompt stays bounded.
 SHOWN_SEARCHES = 40
+
+# With k_max set, the agent picks how many results each search returns.
+NEXT_SEARCH_FIELD = '"next_search": "<your next search query, or null to stop>"'
+K_FIELD = ', "k": <how many results that search should return, {k_min} to {k_max}>'
+K_LINE = "You choose how many results each search returns."
+K_MIN = 5
 MAX_REPLY_TOKENS = 256
 
 
@@ -108,6 +114,26 @@ class LocalChat:
     def __init__(self, decision_model):
         self.llm = decision_model.llm
         self.tok = decision_model.tok
+        self.max_len = self.llm.llm_engine.model_config.max_model_len
+        self.truncated = 0      # prompts cut to fit the context window
+
+    def _fit(self, messages: list[dict], max_tokens: int) -> str:
+        """The prompt, with the end of the last message cut if it would not fit.
+        Results and documents come last, so a cut drops the last ones shown."""
+        limit = self.max_len - max_tokens - 8
+        prompt = self.tok.apply_chat_template(messages, tokenize=False,
+                                              add_generation_prompt=True)
+        if len(self.tok.encode(prompt)) <= limit:
+            return prompt
+        self.truncated += 1
+        body = messages[-1]["content"]
+        while True:
+            body = body[: int(len(body) * 0.9)]
+            cut = [*messages[:-1], {**messages[-1], "content": body}]
+            prompt = self.tok.apply_chat_template(cut, tokenize=False,
+                                                  add_generation_prompt=True)
+            if len(self.tok.encode(prompt)) <= limit:
+                return prompt
 
     def chat(self, messages: list[dict], max_tokens: int,
              temperature: float = 0.0) -> ChatReply:
@@ -118,8 +144,7 @@ class LocalChat:
         """One engine call for all conversations. `seconds` is the shared wait."""
         from vllm import SamplingParams
 
-        prompts = [self.tok.apply_chat_template(
-            m, tokenize=False, add_generation_prompt=True) for m in conversations]
+        prompts = [self._fit(m, max_tokens) for m in conversations]
         params = SamplingParams(max_tokens=max_tokens, temperature=temperature)
         t0 = time.perf_counter()
         outs = self.llm.generate(prompts, params, use_tqdm=False)
@@ -208,6 +233,7 @@ class RetrievalTool:
         self.calls = 0
         self.docs_returned = 0
         self.seconds = 0.0
+        self.returned: set[str] = set()
 
     def search(self, query: str, k: int | None = None,
                exclude: frozenset | set = frozenset(),
@@ -222,6 +248,7 @@ class RetrievalTool:
         self.seconds += time.perf_counter() - t0
         self.calls += 1
         self.docs_returned += len(hits)
+        self.returned.update(did for did, _ in hits)
         return [
             {"id": did,
              "score": score,
@@ -232,6 +259,7 @@ class RetrievalTool:
     def reset(self):
         self.calls = self.docs_returned = 0
         self.seconds = 0.0
+        self.returned = set()
 
 
 class SearchAgent:
@@ -246,13 +274,16 @@ class SearchAgent:
 
     def __init__(self, client, model: str, max_steps: int = 8,
                  temperature: float = 0.0, tools: tuple = ("semantic",),
-                 stop: str = "agent"):
+                 stop: str = "agent", k_max: int = 0):
         unknown = set(tools) - set(TOOLS)
         if unknown or not tools:
             raise ValueError(f"tools must be a subset of {TOOLS}, not {tools}")
         if stop not in STOP_RULES:
             raise ValueError(f"stop must be one of {STOP_RULES}, not {stop}")
         self.stop = stop
+        if k_max and k_max < K_MIN:
+            raise ValueError(f"k_max must be 0 or at least {K_MIN}")
+        self.k_max = k_max
         self.client = client
         self.model_name = model
         self.max_steps = max_steps
@@ -293,6 +324,12 @@ class SearchAgent:
         prompt = SYSTEM_PROMPT_TOOLS if len(self.tools) > 1 else SYSTEM_PROMPT
         if self.stop == "dry":
             prompt = prompt.replace(STOP_LINE, PERSIST_LINE)
+        if self.k_max:
+            prompt = prompt.replace(
+                NEXT_SEARCH_FIELD,
+                NEXT_SEARCH_FIELD + K_FIELD.format(k_min=K_MIN, k_max=self.k_max))
+            prompt = prompt.replace(STOP_LINE, K_LINE + " " + STOP_LINE).replace(
+                PERSIST_LINE, K_LINE + " " + PERSIST_LINE)
         system = prompt + (f"\n\nSession {session}." if session else "")
         kept: set[str] = set()
         seen: set[str] = set()
@@ -300,7 +337,8 @@ class SearchAgent:
         results: list[dict] = []
         stats = {"steps": 0, "stopped_early": False, "gen_tokens": 0,
                  "prompt_tokens": 0, "llm_seconds": 0.0, "llm_calls": 0,
-                 "parse_failures": 0, "keyword_searches": 0, "nudges": 0}
+                 "parse_failures": 0, "keyword_searches": 0, "nudges": 0,
+                 "k_sum": 0}
         dry = 0          # searches in a row whose results the agent kept none of
         note = ""
 
@@ -345,7 +383,13 @@ class SearchAgent:
             mode = parsed.get("search_type")
             if mode not in self.tools:
                 mode = self.tools[0]
-            results = tool.search(next_search, exclude=seen, mode=mode)
+            k = None
+            if self.k_max:
+                k = parsed.get("k")
+                k = (min(max(int(k), K_MIN), self.k_max)
+                     if isinstance(k, (int, float)) and not isinstance(k, bool) else tool.k)
+            results = tool.search(next_search, k=k, exclude=seen, mode=mode)
+            stats["k_sum"] += k or tool.k
             seen.update(r["id"] for r in results)
             searches.append(f"[{mode}] {next_search}" if len(self.tools) > 1 else next_search)
             stats["keyword_searches"] += mode == "keyword"
@@ -377,12 +421,17 @@ def package(agent: SearchAgent, tool: RetrievalTool, query, matches: set[str],
             "parse_failures": float(stats.get("parse_failures", 0)),
             "keyword_searches": float(stats.get("keyword_searches", 0)),
             "nudges": float(stats.get("nudges", 0)),
+            # relevant documents the searches returned; tp is how many were kept
+            "gold_seen": float(len(tool.returned & set(query.gold))),
+            "mean_k": stats.get("k_sum", 0) / max(stats.get("steps", 0), 1),
         },
         extra={
             "model": agent.model_name,
             "max_steps": agent.max_steps,
             "tools": ",".join(agent.tools),
             "stop_rule": agent.stop,
+            "k_max": agent.k_max,
+            "snippet_chars": tool.snippet_chars,
             "stopped_early": bool(stats.get("stopped_early", False)),
         },
     )
@@ -391,9 +440,12 @@ def package(agent: SearchAgent, tool: RetrievalTool, query, matches: set[str],
 def run(agent: SearchAgent, tool: RetrievalTool, query) -> ArmResult:
     """Run the agent on one query and package the result."""
     tool.reset()
+    cut = getattr(agent.client, "truncated", 0)
     t0 = time.perf_counter()
     matches, stats = agent.find(query.text, tool)
-    return package(agent, tool, query, matches, stats, time.perf_counter() - t0)
+    r = package(agent, tool, query, matches, stats, time.perf_counter() - t0)
+    r.counts["truncated_prompts"] = float(getattr(agent.client, "truncated", 0) - cut)
+    return r
 
 
 def run_many(agent: SearchAgent, new_tool, queries: list,

@@ -15,8 +15,8 @@ cd "$PROJECT"
 ssh "$HOST" "mkdir -p '$REMOTE_DIR/logs'"
 # Named files only, so chtc/.env never leaves this machine.
 rsync -aR --exclude='__pycache__' --exclude='*.pyc' \
-    src chtc/run_scan_vs_agent.sh chtc/run_kev_scan.sh chtc/run_jev_scan_old.sh chtc/run_jev_rerank_scan.sh \
-    chtc/scan_vs_agent.sub chtc/kev_scan.sub chtc/jev_scan_old.sub chtc/jev_rerank_scan.sub requirements.txt \
+    src chtc/run_scan_vs_agent.sh chtc/run_kev_scan.sh chtc/run_jev_rerank_scan.sh \
+    chtc/scan_vs_agent.sub chtc/kev_scan.sub chtc/jev_rerank_scan.sub requirements.txt \
     "$HOST:$REMOTE_DIR/"
 # Built data (src.synergy_build). jev_rerank_scan.sub transfers data/, so it must exist.
 ssh "$HOST" "mkdir -p '$REMOTE_DIR/data'"

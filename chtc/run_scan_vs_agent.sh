@@ -63,6 +63,12 @@ AGENT_REPLICAS="${12:-1}"
 AGENT_TOOLS="${13:-semantic}"
 # agent (stop when it says so) or dry (only after two searches find nothing).
 AGENT_STOP="${14:-agent}"
+# Characters of each search result the agent sees (the scan sees MAX_CHARS).
+AGENT_SNIPPET="${15:-300}"
+# 0: every search returns 20 results; otherwise the agent picks 5 to this many.
+AGENT_KMAX="${16:-0}"
+# Documents per prompt for the listwise arm.
+LISTWISE_GROUP="${17:-20}"
 
 OUT="results/${DATASET}_${TAG}.jsonl"
 echo "=== dataset=$DATASET model=$MODEL sizes=$SIZES batches=$BATCHES k=$K arms=$ARMS ==="
@@ -70,7 +76,7 @@ echo "=== dataset=$DATASET model=$MODEL sizes=$SIZES batches=$BATCHES k=$K arms=
 # Smoke test first: catches a typo in 30 seconds instead of after the model
 # has spent ten minutes loading onto the GPU.
 echo "=== smoke test (mock model, no GPU) ==="
-python3 -m src.runner --dataset synthetic --arms classify,ann,hybrid,agent \
+python3 -m src.runner --dataset synthetic --arms classify,ann,hybrid,agent,listwise \
     --model mock --embed-backend tfidf \
     --corpus-sizes 300 --batch-sizes 32 --k 50 --agent-concurrency 1,3 \
     --out results/_smoke.jsonl
@@ -103,6 +109,9 @@ for BS in "${BATCH_LIST[@]}"; do
         --agent-replicas "$AGENT_REPLICAS" \
         --agent-tools "$AGENT_TOOLS" \
         --agent-stop "$AGENT_STOP" \
+        --agent-snippet-chars "$AGENT_SNIPPET" \
+        --agent-k-max "$AGENT_KMAX" \
+        --listwise-group "$LISTWISE_GROUP" \
         --out "$OUT" \
         --scores-out "$SCORES"
 done

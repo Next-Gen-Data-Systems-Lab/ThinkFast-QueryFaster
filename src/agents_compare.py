@@ -32,6 +32,11 @@ AGENTS = {
     # Told answer sets can be large, and held to stopping only after two
     # searches in a row find nothing (--agent-stop dry), up to 256 steps.
     "7B, persistent": "results/20newsgroups_agentdry.jsonl",
+    # Sees 2,000 characters of each result, as the scan does, instead of 300.
+    "7B, full text": "results/20newsgroups_agentfull.jsonl",
+    # Chooses how many results each search returns (5 to 100).
+    "7B, chooses k": "results/20newsgroups_agentk.jsonl",
+    "7B, chooses k, persistent": "results/20newsgroups_agentkdry.jsonl",
 }
 SCANS = {   # scores file, and how to get documents per second at each N
     "qwen": ("results/20newsgroups_sweep_bs32.scores.jsonl", None),
@@ -83,13 +88,21 @@ def main(argv=None):
                      "precision": float(g.precision.mean()), "seconds": float(g.wall_s.mean()),
                      "steps": float(g.n_steps.mean()),
                      "s_per_call": float(g.t_llm.sum() / g.n_llm_calls.sum()), "scans": {}}
+            if "n_gold_seen" in g:
+                # Of the relevant documents its searches returned, how many it kept.
+                entry["gold_seen"] = float(g.n_gold_seen.mean())
+                entry["kept_of_seen"] = float(g.tp.sum() / max(g.n_gold_seen.sum(), 1))
+                entry["mean_k"] = float(g.n_mean_k.mean())
             if "n_nudges" in g:
                 entry["nudges"] = float(g.n_nudges.mean())
                 entry["hit_step_limit"] = int((~g.stopped_early.astype(bool)).sum())
             if "n_keyword_searches" in g:
                 entry["keyword_share"] = float(g.n_keyword_searches.sum() / max(g.n_steps.sum(), 1))
-            line = (f"{name:24s} N={n:6d} agent R {entry['recall']:.3f} "
+            line = (f"{name:26s} N={n:6d} agent R {entry['recall']:.3f} "
                     f"{entry['seconds']:5.1f}s {entry['s_per_call']:.2f} s/call")
+            if "kept_of_seen" in entry:
+                line += (f" k {entry['mean_k']:.0f}, kept {entry['kept_of_seen']:.0%} "
+                         f"of {entry['gold_seen']:.0f} relevant seen")
             for scan, (scores, rows_path) in SCANS.items():
                 docs_per_s = rate(rows_path, n)
                 score_file = scores.format(**tags(n))

@@ -47,7 +47,7 @@ condor_submit BATCHES=32 TAG=name GPU='H200$' LENGTH=short chtc/scan_vs_agent.su
 ```
 
 Submit-time options: `DATASET MODEL SIZES BATCHES K TAG ARMS MAX_QUERIES
-AGENT_STEPS AGENT_CONCURRENCY AGENT_REPLICAS AGENT_TOOLS AGENT_STOP MAX_CHARS GPU LENGTH
+AGENT_STEPS AGENT_CONCURRENCY AGENT_REPLICAS AGENT_TOOLS AGENT_STOP AGENT_SNIPPET AGENT_KMAX LISTWISE_GROUP MAX_CHARS GPU LENGTH
 MEMORY DISK`. Qwen2.5-32B needs `DISK=200GB MEMORY=96GB`. The default `GPU` is
 `A100|H200`, so pass `GPU='H200$'` for timings comparable with other runs.
 
@@ -96,7 +96,8 @@ MEMORY DISK`. Qwen2.5-32B needs `DISK=200GB MEMORY=96GB`. The default `GPU` is
   (also `MODES MAX_QUERIES LENGTH`). `python -m src.kev_compare` compares offline.
 - Scan jobs in the Python 3.12 environment: `condor_submit MODULE=jev_scan|rerank_scan
   MODEL=bge|minilm|- TAG=... DATASET=... SIZES=... chtc/jev_rerank_scan.sub`. It transfers
-  `data/`. `chtc/jev_scan_old.sub` is the older JEV-only version. Pinned HF revision; stock transformers Qwen3.5, so no
+  `data/`. The 20NG, logic and NFCorpus JEV results came from the removed `jev.sub`
+  (jobs 12437150-53), which ran the same environment and module. Pinned HF revision; stock transformers Qwen3.5, so no
   repo code runs. Compare with `python -m src.kev_compare --model jev`.
 - `src/kev_scan.py` runs only in Kev's environment through `chtc/run_kev_scan.sh`, pinned
   to a commit whose code was read. Kev's code has not been run on this Mac.
