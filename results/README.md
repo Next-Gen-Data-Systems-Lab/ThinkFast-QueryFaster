@@ -48,7 +48,7 @@ All runs are on one H200 unless the file's `gpu` field says otherwise.
 | `arxiv_scale` | arXiv at 10K, 100K and 1M: Qwen classifies each query's top 20K by embedding (`hybrid`, k = 20,000), plus the 7B agent. | `scale_compare`, `paper_figs` | `tab:scale`, `fig:time` |
 | `{20newsgroups,synergy}_agentfull` | 7B agent seeing 2,000 characters per result instead of 300 (`AGENT_SNIPPET=2000`). | `agents_compare`, `synergy_compare` | `tab:agents`, `sec:freer` |
 | `{20newsgroups,synergy}_agentk`, `_agentkdry` | 7B agent choosing k per search, 5 to 100 (`AGENT_KMAX=100`); `agentkdry` is also persistent, and is the strongest agent. Rows carry `n_gold_seen` and `n_mean_k`. | `agents_compare`, `synergy_compare` | `tab:agents`, `sec:freer` |
-| `{20newsgroups,synergy}_listwise` | List-wise scan: 20 documents per prompt, the model names the matches; scores are 0/1. SYNERGY has 7 reviews until job 12439024 finishes. | `listwise_compare` | `sec:freer` |
+| `{20newsgroups,synergy}_listwise` | List-wise scan: 20 documents per prompt, the model names the matches; scores are 0/1. SYNERGY has 7 reviews until jobs 12439055-73 finish. | `listwise_compare` | `sec:freer` |
 | `arxiv_kev9b_packed` | Kev scanning all of arXiv 100K, every query in one pass (job 12437631). | `paper_figs` (arXiv panel) | `sec:scale`, `fig:time` |
 | `*_embed_<N>.npz` | Embedding rankings for 20NG, logic, NFCorpus, each SYNERGY review and arXiv. The arXiv 1M file took 2 hours to compute on a laptop. | everything that replays | |
 
@@ -56,7 +56,7 @@ All runs are on one H200 unless the file's `gpu` field says otherwise.
 
 | Files | What they will hold |
 |---|---|
-| `synergy_listwise` | The rest of the 26 reviews (job 12439024, rerun with prefix caching off after three vLLM crashes on review 8). |
+| `synergy_listwise` | The rest of the 26 reviews (jobs 12439055-73, one per review, `synergy_<review>_listwise`, after four vLLM crashes on one host; merge into `synergy_listwise`). |
 | `arxiv_kev9b1m_packed` | Kev scanning all of arXiv 1M. Its full scores file is about 1 GB, over GitHub's 100 MB limit, so it is not committed; a compact copy will be. |
 
 ## Summaries

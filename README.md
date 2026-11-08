@@ -106,13 +106,13 @@ questions).** On 20 Newsgroups 10K and SYNERGY, recall and seconds per query:
 
 | Jobs | What | Why |
 |---|---|---|
-| 12439024 | The list-wise scan on all 26 SYNERGY reviews, with vLLM prefix caching off (`PREFIX_CACHE=off`). Jobs 12438054, 12439001 and 12439020 each hit a CUDA illegal memory access in vLLM on the 8th review (Jeyaraman_2020); the third avoided the first host name but landed on gpu5000, possibly the same machine | Finishes finding 6 |
+| 12439055-73 | The list-wise scan on SYNERGY reviews 8 to 26, one job per review (`DATASET=synergy_<review>`), prefix caching off, kept off host gpu5000 (`AVOID=gpu5000`). Four runs of all 26 in one job crashed with a CUDA illegal memory access in vLLM, all on that host: three on review 8 with caching on, one on review 9 with it off (review 8 then finished, but with recall 0.06 and 22 unparsable replies, so it is rerun too). Other workloads on that host match other hosts, so this looks like a vLLM bug with long prompts | Finishes finding 6 |
 | 12437632 | Kev scanning all of arXiv 1M | How complete an exhaustive scan gets at scale |
 
 **Next:** rehearse for Nov 10. The deck (main-result slide, a new slide on the
 agent variants, the summary) and the report (abstract, `tab:agents`, new
 `sec:freer`, arXiv in `sec:scale`, discussion, conclusion) now carry findings 1
-and 6. When 12439024 lands, replace the report's 7-review SYNERGY list-wise
+and 6. When 12439055-73 land, replace the report's 7-review SYNERGY list-wise
 sentence (marked TODO in a comment). The midterm-era numbers (one query at a time, without equal time) are in
 the deck's backup slides and `python -m src.summarize_runs results`.
 
@@ -665,8 +665,8 @@ The two contributions are adaptive k and the exchange rate.
       (jobs 12438047-54, TAGs agentfull, agentk, agentkdry, listwise, on 20
       Newsgroups 10K and all of SYNERGY). Raised by Ayesha. Done except the
       SYNERGY list-wise scan, which crashed after 7 reviews (CUDA illegal memory
-      access in vLLM) three times on the same review, and was resubmitted as
-      12439024 with prefix caching off. Results are finding 6 in
+      access in vLLM) four times on one host, and was resubmitted as one job
+      per review (12439055-73). Results are finding 6 in
       Status; `python -m src.agents_compare`, `src.synergy_compare` and
       `src.listwise_compare` print them.
       - `AGENT_SNIPPET=2000` (`--agent-snippet-chars`): the agent sees 2,000

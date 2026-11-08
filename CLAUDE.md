@@ -86,8 +86,10 @@ MEMORY DISK`. `AVOID` is a regular expression on machine names to keep a job off
   equal-time plans from those scores (`python -m src.scale_compare`). `upload.sh`
   leaves `data/arxiv` out.
 - **vLLM crash on list-wise SYNERGY:** with prefix caching on, vLLM 0.6.3 hit a CUDA
-  illegal memory access on review 8 (Jeyaraman_2020) three times. The rerun uses
-  `PREFIX_CACHE=off`; rows record `prefix_caching`.
+  illegal memory access on review 8 (Jeyaraman_2020) three times, and with
+  `PREFIX_CACHE=off` on review 9. All four ran on host gpu5000 (aliases
+  dbrundage-/zliu-chtcgpu5000); other work there is fine. Long list-wise jobs now
+  run one review per job with `AVOID=gpu5000`.
 - **Token budget:** `max_num_batched_tokens` defaults to 2048, which limits
   prefill-only work. The runner sets batch size x 512. Don't size it from
   `max_model_len`: at batch size 256 that means profiling a 524K-token step.
@@ -124,8 +126,8 @@ Overleaf (no LaTeX on this Mac or on CHTC). Keep its numbers in step with README
 Results and status are in the Status section of `README.md`. `results/README.md` maps
 each results file to its experiment, script and report table: add a row when a new
 TAG lands. Teammates read the repo too, so keep stray test outputs out of `results/`. The midterm deck is
-https://claude.ai/artifact/E1R5FHuvJHniGchsHttgeE (10 slides plus 4 backups, with
-timed speaker notes, about 7.5 minutes; updated Nov 8 with the corrected headline,
+https://claude.ai/artifact/E1R5FHuvJHniGchsHttgeE (10 slides plus 2 backups, with
+timed speaker notes, about 7 minutes; updated Nov 8 with the corrected headline,
 a decision-model scan beats every agent and zero-shot Qwen ties the strongest,
 and a slide on the freer agents). Its figure comes from
 `python -m src.paper_figs --slide`, which shows four agents (`SLIDE_AGENTS`).
