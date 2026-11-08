@@ -37,6 +37,8 @@ AGENT_STYLE = {   # marker, filled
     "7B, full text": ("^", True),
     "7B, chooses k": ("v", True), "7B, chooses k, persistent": ("v", False),
 }
+# A slide has room for fewer markers: the reference agents and the strongest.
+SLIDE_AGENTS = ("7B, embeddings", "32B, embeddings", "7B, persistent", "7B, chooses k, persistent")
 
 
 def style(ax) -> None:
@@ -122,7 +124,8 @@ def panel_arxiv(n: int = 1_000_000) -> tuple[str, dict, dict] | None:
 
 
 def figure(out: Path, arxiv_n: int = 100_000, panel_width: float = 3.4,
-           height: float = 3.0, dpi: int = 200, dashed_note: bool = True) -> None:
+           height: float = 3.0, dpi: int = 200, dashed_note: bool = True,
+           only: tuple | None = None) -> None:
     panels = [p for p in (panel_20ng(), panel_synergy(), panel_arxiv(arxiv_n)) if p]
     fig, axes = plt.subplots(1, len(panels), figsize=(panel_width * len(panels), height), sharey=True)
     axes = np.atleast_1d(axes)
@@ -142,6 +145,8 @@ def figure(out: Path, arxiv_n: int = 100_000, panel_width: float = 3.4,
                             xytext=(3, 0), textcoords="offset points", va="center",
                             fontsize=7.5, color=INK)
         for name, (secs, rec) in agents.items():
+            if only is not None and name not in only:
+                continue
             marker, filled = AGENT_STYLE[name]
             ax.scatter([secs], [rec], s=40, marker=marker, zorder=4, linewidth=1.4,
                        facecolor=COLOR["agent"] if filled else "white",
@@ -180,7 +185,7 @@ def main(argv=None):
     args = p.parse_args(argv)
     if args.slide:
         figure(Path(args.outdir), args.arxiv_n, panel_width=2.45, height=2.55, dpi=320,
-               dashed_note=False)
+               dashed_note=False, only=SLIDE_AGENTS)
     else:
         figure(Path(args.outdir), args.arxiv_n)
     print("wrote", Path(args.outdir) / "recall_time.pdf")

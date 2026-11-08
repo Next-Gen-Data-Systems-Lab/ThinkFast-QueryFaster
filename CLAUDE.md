@@ -34,6 +34,12 @@ Keep this file and `README.md` updated with progress as work happens.
   Batched agents only tie it, at the agent's low recall. On arXiv up to 1M the
   agent reads about 200 papers whatever N is, so the scan's lead in papers found
   grows with N (done Nov 7; report Table `tab:scale`).
+- Ayesha's agent variants (done Nov 8, README finding 6): longer snippets barely
+  help; choosing k is the strongest agent, and with the persistent stop rule it
+  ties the zero-shot Qwen scan, while Kev and a tuned threshold still win. The
+  agent keeps only about a third of the relevant documents it sees, the same rate
+  as the Qwen scan at t = 0.5. The list-wise scan ("no tools") is no faster than
+  pointwise and loses precision.
 
 ## Running on CHTC
 

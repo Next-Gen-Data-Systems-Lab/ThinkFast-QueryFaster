@@ -29,29 +29,30 @@ adaptive k work tested rules for choosing that stopping point per query.
 
 ## Status
 
-*Last updated Nov 7, 2026. One H200; Qwen2.5-7B is both scan and agent unless
+*Last updated Nov 8, 2026. One H200; Qwen2.5-7B is both scan and agent unless
 noted. Every number below has a 95% interval and a script in the "Before the
 final report" checklist; `results/README.md` says which file backs which result.*
 
 ### What we found
 
-**1. At equal time, a scan with an open decision model beats every agent; a
-zero-shot scan only ties an agent told to keep searching.** Each agent's
-seconds on each query are given to a scan reading documents in embedding order.
-Recall:
+**1. At equal time, a scan with an open decision model beats every agent,
+including the strongest; a zero-shot scan only ties an agent told to keep
+searching.** Each agent's seconds on each query are given to a scan reading
+documents in embedding order. Recall:
 
-| | 7B agent | Persistent 7B agent | Qwen scan, same time | Kev scan, same time |
-|---|---:|---:|---:|---:|
-| 20 Newsgroups, 10K | 0.087 | 0.224 | 0.292 (+0.07, just significant) | 0.654 |
-| SYNERGY, 26 reviews | 0.159 | 0.257 | 0.305 (+0.05, a tie) | 0.518 |
-| arXiv, 100K | 0.046 | 0.176 | 0.145 (-0.03, a tie) | 0.69 (one query at a time, estimated) |
+| | 7B agent | Persistent 7B agent | Strongest 7B agent (chooses k, persistent) | Qwen scan, its time | Kev scan, its time |
+|---|---:|---:|---:|---:|---:|
+| 20 Newsgroups, 10K | 0.087 | 0.224 | 0.281 | 0.303 (+0.02, a tie) | 0.708 (+0.43) |
+| SYNERGY, 26 reviews | 0.159 | 0.257 | 0.285 | 0.312 (+0.03, a tie) | 0.554 (+0.27) |
+| arXiv, 100K | 0.046 | 0.176 | not run | 0.145 against the persistent agent (-0.03, a tie) | 0.69 (one query at a time, estimated) |
 
-The "same time" columns are measured against the persistent agent; against the
-plain 7B agent every scan wins. Zero-shot Qwen is the weak scan because it is
-badly calibrated: on topic queries the best threshold is about 1e-8, not 0.5.
-With a threshold tuned on the other queries (1e-8 on 20 Newsgroups and arXiv,
-0.03 on SYNERGY) it beats the persistent agent everywhere: +0.35, +0.15 and
-+0.36 recall, all intervals above zero.
+The "its time" columns use the strongest agent's seconds where it ran, the
+persistent agent's on arXiv. Against the plain 7B agent every scan wins. Zero-shot
+Qwen is the weak scan because it is badly calibrated: on topic queries the best
+threshold is about 1e-8, not 0.5. With a threshold tuned on the other queries
+(1e-8 on 20 Newsgroups and arXiv, 0.03 on SYNERGY) it beats the persistent agent
+everywhere (+0.35, +0.15 and +0.36 recall) and the strongest agent on both
+datasets it ran on (+0.32 and +0.13), all intervals above zero.
 
 **2. Agents stop by choice, and their effort does not grow with the answer
 set.** With 64 steps allowed, the 7B agent stops after about 10. On arXiv, from
@@ -73,18 +74,45 @@ scans almost everywhere.
 **5. Choosing scan depth per query does not beat a fixed depth;** an oracle adds
 at most 0.07 recall (a negative result, kept in the report).
 
-### Running (submitted Nov 7)
+**6. Giving the agent more freedom helps it, but not past the scan (Ayesha's
+questions).** On 20 Newsgroups 10K and SYNERGY, recall and seconds per query:
+
+| Agent | 20NG R | 20NG s | SYNERGY R | SYNERGY s |
+|---|---:|---:|---:|---:|
+| 7B, 300-character results, k = 20 (reference) | 0.087 | 5.0 | 0.159 | 5.3 |
+| Sees 2,000 characters per result, as the scan does | 0.100 | 7.5 | 0.191 | 7.4 |
+| Chooses k per search (5 to 100; it picks about 47) | 0.230 | 18.2 | 0.230 | 14.4 |
+| Chooses k and persistent | 0.281 | 33.2 | 0.285 | 20.8 |
+
+- **Snippet length was not the handicap.** Full text adds 0.01-0.03 recall and
+  costs 1.5x the time.
+- **Choosing k is the big lever.** The agent asks for more per search, reads far
+  more (1,065 documents per SYNERGY review against 219), and recall rises 1.4 to
+  2.6x. It also spends 3 to 4 times the seconds, and the equal-time scan keeps up.
+- **The agent's judgment, not its search, caps it.** Counting the relevant
+  documents its searches return, it keeps only 36-38% of them on 20 Newsgroups
+  and 20-41% on SYNERGY. The same model keeps 31% and 32% of them when it
+  scans at t = 0.5, so the agent cannot get past the zero-shot judge it is
+  built on.
+- **An LLM "without tools" is the list-wise scan:** 20 documents per prompt, the
+  model names the matches. On 20 Newsgroups it is no faster than the pointwise
+  scan (170 documents per second each, since both read every document once), has
+  the same recall (0.339 against 0.310, a tie) and much lower precision (0.25
+  against 0.76; F1 -0.14, worse on 19 of 20 queries). It names 733 documents per
+  query for 500 relevant ones, and its 0/1 answers cannot be re-thresholded.
+  SYNERGY has 7 of 26 reviews so far, with the same pattern (precision 0.035).
+
+### Running
 
 | Jobs | What | Why |
 |---|---|---|
-| 12438047-54 | On 20 Newsgroups 10K and SYNERGY: agent seeing full text (2,000 characters, as the scan does, not 300); agent choosing k, with and without the persistent rule; the list-wise scan | Ayesha's questions: is the agent handicapped, and what does an LLM without search tools amount to |
+| 12439001 | The list-wise scan on SYNERGY, resubmitted: job 12438054 hit a CUDA illegal memory access in vLLM after 7 reviews | Finishes finding 6 |
 | 12437632 | Kev scanning all of arXiv 1M | How complete an exhaustive scan gets at scale |
 
-**Next:** when these land, rewrite the deck's main-result slide and the report
-around finding 1 as stated above (the deck still says every scan beats every
-agent), then rehearse for Nov 10. The midterm-era numbers (one query at a time,
-without equal time) are in the deck's backup slides and
-`python -m src.summarize_runs results`.
+**Next:** rewrite the deck's main-result slide and the report around findings 1
+and 6 (the deck still says every scan beats every agent), then rehearse for
+Nov 10. The midterm-era numbers (one query at a time, without equal time) are in
+the deck's backup slides and `python -m src.summarize_runs results`.
 
 ### Offline analysis of hybrid plans
 
@@ -630,8 +658,12 @@ The two contributions are adaptive k and the exchange rate.
       beats every agent" holds only for a decision model or a calibrated
       threshold once the agent is told to persist.
 - [ ] Is the agent handicapped, and does a scan need one document per prompt?
-      (submitted Nov 7, TAGs agentfull, agentk, agentkdry, listwise, on 20
-      Newsgroups 10K and all of SYNERGY). Raised by Ayesha.
+      (jobs 12438047-54, TAGs agentfull, agentk, agentkdry, listwise, on 20
+      Newsgroups 10K and all of SYNERGY). Raised by Ayesha. Done except the
+      SYNERGY list-wise scan, which crashed after 7 reviews (CUDA illegal memory
+      access in vLLM) and was resubmitted as 12439001. Results are finding 6 in
+      Status; `python -m src.agents_compare`, `src.synergy_compare` and
+      `src.listwise_compare` print them.
       - `AGENT_SNIPPET=2000` (`--agent-snippet-chars`): the agent sees 2,000
         characters of each result, the text the scan sees, instead of 300.
       - `AGENT_KMAX=100` (`--agent-k-max`): the agent picks how many results each
