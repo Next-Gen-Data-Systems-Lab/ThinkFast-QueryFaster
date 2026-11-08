@@ -34,7 +34,7 @@ Keep this file and `README.md` updated with progress as work happens.
   Batched agents only tie it, at the agent's low recall. On arXiv up to 1M the
   agent reads about 200 papers whatever N is, so the scan's lead in papers found
   grows with N (done Nov 7; report Table `tab:scale`).
-- Ayesha's agent variants (done Nov 8, README finding 6): longer snippets barely
+- Ayesha's agent variants (done Nov 8, report `sec:freer`): longer snippets barely
   help; choosing k is the strongest agent, and with the persistent stop rule it
   ties the zero-shot Qwen scan, while Kev and a tuned threshold still win. The
   agent keeps only about a third of the relevant documents it sees, the same rate
@@ -114,7 +114,7 @@ MEMORY DISK`. `AVOID` is a regular expression on machine names to keep a job off
   to a commit whose code was read. Kev's code has not been run on this Mac.
 - `SearchAgent._steps` is a generator, so `find` and `run_many` share one loop.
   A batched row's `wall_s` is latency; cost is `batch_wall_s` over calls.
-- The local test command is in the README quick start. There is no system
+- The local test command is under "Test offline" in the README. There is no system
   `timeout` command on this Mac.
 
 ## Progress
@@ -123,7 +123,9 @@ The short paper is `paper/paper.tex` (ACM sigconf; figure from
 `python -m src.paper_figs`). The final report is `report/report.tex` with `refs.bib` and `figs/`, compiled on
 Overleaf (no LaTeX on this Mac or on CHTC). Keep its numbers in step with README.
 
-Results and status are in the Status section of `README.md`. `results/README.md` maps
+`README.md` is a short plain-language overview (what we did, what we found,
+status); keep it short. Detailed numbers go in the report, and the old lab notes
+are archived in `docs/experiment-log.md` (not updated). `results/README.md` maps
 each results file to its experiment, script and report table: add a row when a new
 TAG lands. Teammates read the repo too, so keep stray test outputs out of `results/`. The midterm deck is
 https://claude.ai/artifact/E1R5FHuvJHniGchsHttgeE (10 slides plus 2 backups, with
