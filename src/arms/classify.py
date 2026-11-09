@@ -71,6 +71,7 @@ class DecisionModel:
         dtype: str = "auto",
         seed: int = 0,
         prefix_caching: bool = True,
+        cuda_graph: str = "full",
     ):
         from vllm import LLM, SamplingParams
 
@@ -86,6 +87,12 @@ class DecisionModel:
             dtype=dtype,
             seed=seed,
             enable_prefix_caching=prefix_caching,
+            # vLLM 0.6.3 decodes in CUDA graphs up to 8,192 tokens and eagerly
+            # past that, and past that its output came out as garbage. "full"
+            # covers the whole context, "eager" uses no graphs; both fix it.
+            enforce_eager=cuda_graph == "eager",
+            **({"max_seq_len_to_capture": max_model_len}
+               if cuda_graph == "full" else {}),
             # vLLM refuses prefix caching if a model declares a sliding window,
             # as Phi-3.5 does. Our context is far shorter than any such window.
             disable_sliding_window=True,

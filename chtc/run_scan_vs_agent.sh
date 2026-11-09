@@ -73,6 +73,8 @@ LISTWISE_GROUP="${17:-20}"
 PREFIX_CACHE="${18:-on}"
 CACHE_FLAG=()
 [[ "$PREFIX_CACHE" == "off" ]] && CACHE_FLAG=(--no-prefix-cache)
+# full, default or eager: vLLM CUDA graphs (see runner.py).
+CUDA_GRAPH="${19:-full}"
 
 OUT="results/${DATASET}_${TAG}.jsonl"
 echo "=== dataset=$DATASET model=$MODEL sizes=$SIZES batches=$BATCHES k=$K arms=$ARMS ==="
@@ -117,6 +119,7 @@ for BS in "${BATCH_LIST[@]}"; do
         --agent-k-max "$AGENT_KMAX" \
         --listwise-group "$LISTWISE_GROUP" \
         ${CACHE_FLAG[@]+"${CACHE_FLAG[@]}"} \
+        --cuda-graph "$CUDA_GRAPH" \
         --out "$OUT" \
         --scores-out "$SCORES"
 done

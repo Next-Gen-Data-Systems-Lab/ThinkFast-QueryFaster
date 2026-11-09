@@ -49,6 +49,11 @@ right answers each found (recall).
    medical criteria; cheap scorers (BM25, embeddings, rerankers) trail every LLM
    scan; choosing scan depth per query does not beat a fixed depth; putting 20
    documents in one prompt is no faster and much less precise.
+7. **The semantic-operator speed-up works, but a simple rule does as well.**
+   LOTUS-style filtering (embeddings rank everything, and the LLM checks only
+   the uncertain middle) makes the scan about 3x cheaper for almost no loss.
+   But checking a fixed number of top documents per query, at the same cost,
+   is just as good.
 
 Recall, with the scan given the agent's time on each query:
 
@@ -79,12 +84,15 @@ built for yes/no decisions, because an agent cannot tell what it missed.
 ## Status
 
 - **Rerunning (Nov 8):** the newer agents (persistent, full text, choosing k, and
-  their combinations). An agent reply that was not valid JSON used to count as
-  a request to stop, which ended many of those runs early; it is now asked for
-  again. Findings 3 and 4 and the deck's agent slide will be updated from the
-  reruns. The plain 7B, 32B and keyword agents were barely affected (2-3 bad
-  replies in 60 runs).
-- **Running:** Kev scanning all of arXiv at 1M.
+  their combinations) and the list-wise scan. Two bugs cut those runs short:
+  a reply that was not valid JSON counted as a request to stop, and our serving
+  engine (vLLM 0.6.3) wrote garbage once a conversation passed 8,192 tokens.
+  Both are fixed; on SYNERGY the strongest agent with full text went from 0.12 to
+  0.43 recall. Findings 3 and 4, the table and the deck will be updated from the
+  reruns. The plain 7B, 32B and keyword agents never reached 8,192 tokens and
+  stand as they are.
+- **Failed, to retry:** Kev scanning all of arXiv at 1M hit the 24-hour limit
+  after running out of memory; it needs more memory or splitting.
 - **To do:** rehearse the talk; compile the report on Overleaf.
 - **Known gap:** the list-wise scan covers 20 of the 26 SYNERGY reviews; vLLM
   0.6.3 crashes on the long prompts of the other six.

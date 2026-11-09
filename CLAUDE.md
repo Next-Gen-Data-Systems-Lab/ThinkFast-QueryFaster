@@ -25,8 +25,10 @@ Keep this file and `README.md` updated with progress as work happens.
   metadata for scale. 20 Newsgroups stays as the development set. RCV1 needs a
   signed NIST agreement, so it is not planned.
 - Contribution before Dec 7: the exchange rate (one agent step buys N
-  classification decisions) and adaptive k. Query rewriting is future work. Skip
-  the confidence cascade, which is too close to JEVDB.
+  classification decisions) and adaptive k. Query rewriting is future work. The
+  LOTUS-style cascade was replayed offline on Nov 9 (`src.cascade`, report
+  `tab:cascade`): about 3x cheaper than a full scan at almost no F1 loss, but it
+  only ties fixed k at equal cost, like the adaptive-k rules.
 - Position adaptive k as cost-based access-path selection, and check the ranked
   list truncation literature first. Done: the test came back negative, so report
   it as a negative result with the oracle bound. The strongest finding is the
@@ -53,7 +55,7 @@ condor_submit BATCHES=32 TAG=name GPU='H200$' LENGTH=short chtc/scan_vs_agent.su
 ```
 
 Submit-time options: `DATASET MODEL SIZES BATCHES K TAG ARMS MAX_QUERIES
-AGENT_STEPS AGENT_CONCURRENCY AGENT_REPLICAS AGENT_TOOLS AGENT_STOP AGENT_SNIPPET AGENT_KMAX LISTWISE_GROUP PREFIX_CACHE MAX_CHARS GPU AVOID LENGTH
+AGENT_STEPS AGENT_CONCURRENCY AGENT_REPLICAS AGENT_TOOLS AGENT_STOP AGENT_SNIPPET AGENT_KMAX LISTWISE_GROUP PREFIX_CACHE CUDA_GRAPH MAX_CHARS GPU AVOID LENGTH
 MEMORY DISK`. `AVOID` is a regular expression on machine names to keep a job off. Qwen2.5-32B needs `DISK=200GB MEMORY=96GB`. The default `GPU` is
 `A100|H200`, so pass `GPU='H200$'` for timings comparable with other runs.
 
@@ -91,13 +93,26 @@ MEMORY DISK`. `AVOID` is a regular expression on machine names to keep a job off
   dbrundage-/zliu-chtcgpu5000). Run one review per job on other machines, it
   crashed the same way on six reviews (Leenaars_2019, Leenaars_2020, Menon_2022,
   Muthu_2021, Wassenaar_2017, Wolters_2018), so it is the prompts, not the host.
-  The list-wise SYNERGY result covers the other 20; untried fixes are
-  `enforce_eager` or a smaller `LISTWISE_GROUP`.
+  Those prompts run past 8,192 tokens, so the likely cause is the CUDA graph bug
+  below; the Nov 8 rerun (job 12440573) has all 26 reviews with `CUDA_GRAPH=full`.
+- **vLLM garbage past 8,192 tokens:** vLLM 0.6.3 decodes in CUDA graphs up to
+  `max_seq_len_to_capture` (8,192) and falls back past that, and the fallback
+  produced word salad. It hit every agent given a context window over 8K (persistent,
+  full text, choose k) once a prompt plus reply passed 8,192 tokens; the 4K-window
+  base agents never got there, and the scan generates one token from prefill, so it
+  is unaffected. Proved on Nov 8 by rerunning SYNERGY full-text choose-k: recall
+  0.12 with vLLM's default, 0.43 with `CUDA_GRAPH=full` or `eager`. `CUDA_GRAPH=full`
+  is now the default. Prefix caching and sampled retries were ruled out first.
 - **Agent replies that are not JSON:** until Nov 8 an unusable reply had no
-  `next_search`, so it counted as a stop and often ended persistent, full-text and
-  choose-k runs early. Now it is asked for again (`PARSE_RETRIES`), and rows record
-  `stop_reason`, `n_cut_replies` and `bad_replies`. Those agents were rerun (jobs
-  12439148-58); the earlier files are in git history.
+  `next_search`, so it counted as a stop. Now it is asked for again
+  (`PARSE_RETRIES`, sampled at `RETRY_TEMPERATURE`), and rows record `stop_reason`,
+  `n_cut_replies`, `bad_replies` and the first failing prompt (`bad_prompt`). What is
+  left is the model's own: a search string that runs to the 512-token reply cap.
+  Such a cut reply is salvaged (`salvage_reply`): its complete keep list and the
+  first 300 characters of its search are used, counted in `n_salvaged_replies`.
+- **Agent and list-wise reruns:** after these fixes, jobs 12440591-601 reran every
+  newer agent and 12440567, 12440573 the list-wise scan, with the same tags. Earlier outputs are in
+  `results_old_nov8/` on the access point and in git history.
 - **Token budget:** `max_num_batched_tokens` defaults to 2048, which limits
   prefill-only work. The runner sets batch size x 512. Don't size it from
   `max_model_len`: at batch size 256 that means profiling a 524K-token step.

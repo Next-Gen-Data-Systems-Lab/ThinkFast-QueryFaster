@@ -97,8 +97,9 @@ contributions are:
   task: 26 systematic reviews (\S\ref{sec:agents}, \S\ref{sec:synergy},
   \S\ref{sec:freer}).
   \item A negative result for adaptive $k$, framed as cost-based access-path
-  selection, with an oracle bound on what any such rule could gain
-  (\S\ref{sec:adaptive}).
+  selection, with an oracle bound on what any such rule could gain; a
+  LOTUS-style cascade cuts the scan's cost about 3$\times$ at almost no loss,
+  but also only ties a fixed $k$ at the same cost (\S\ref{sec:adaptive}).
   \item A comparison of scorers: cheap ones (BM25, embeddings, cross-encoder
   rerankers) against a zero-shot LLM and two open decision models
   (\S\ref{sec:decision}, \S\ref{sec:scorers}).
@@ -139,8 +140,8 @@ hold with high probability, and sends only the uncertain band to the large
 model. Kim et al.~\cite{kim2026semfilter} unify such cascades and combine
 clustering, an online proxy and shared oracle calls, reporting 1.6--2.0$\times$
 speedups at a 90\% accuracy target. These systems make the scan cheaper; we
-instead ask when the scan is worth running at all compared with an agent, and
-we deliberately leave cascades out of scope.
+instead ask when the scan is worth running at all compared with an agent. We
+replay a LOTUS-style cascade over our scans in Section~\ref{sec:adaptive}.
 
 \paragraph{Decision models.}
 Jev~\cite{typesafe_jev} is a hosted model that answers typed questions (yes/no,
@@ -639,6 +640,57 @@ one corpus is applied to another ($t=0.5$).}
 \label{tab:transfer}
 \end{table}
 
+\paragraph{A LOTUS-style cascade.}
+LOTUS makes \texttt{sem\_filter} cheaper with a cascade~\cite{patel2024lotus}:
+a cheap proxy ranks every document, the LLM (the oracle) labels a sample, and
+two cuts set from that sample accept the top without the oracle, reject the
+bottom, and send only the band between to the oracle. We replayed it from saved
+scores (\texttt{src.cascade}). The proxy is embedding similarity, which costs
+nothing extra because the index exists, or the MiniLM cross-encoder; the oracle
+is Qwen or Kev at its held-out threshold. The sample is 500 documents (at most a
+quarter of $N$), half uniform and half weighted by $1/\text{rank}$, and the cuts
+target 90\% recall and precision against the oracle. LOTUS corrects the cuts so
+the targets hold with high probability; we use a bootstrap lower bound at
+$\delta = 0.05$. Costs use measured documents per second, and every result is
+the mean of ten samples.
+
+The cascade works as advertised (Table~\ref{tab:cascade}). With embeddings as
+the proxy it sends 42--52\% of documents to the oracle, runs 2.5--3.2$\times$
+faster and loses at most 0.01 F1. Without the correction it is cheaper still
+(31\% of documents and 4.2$\times$ on 20 Newsgroups with Qwen) but misses its
+own target: it keeps 0.89 of Qwen's positives on 20 Newsgroups and 0.81 on
+SYNERGY. Even with the correction it reaches only 0.84 on SYNERGY, because the
+few positives the proxy ranks low are too rare for any sample of 500 to find.
+MiniLM is a worse proxy than embeddings: it costs time and needs a wider band.
+
+It does not beat a fixed $k$. At the same mean seconds per query, classifying
+the top $k$ by embedding for every query matches or beats the cascade in every
+setting, by 0.003--0.035 F1. The cascade is an adaptive-$k$ rule that pays
+oracle calls for its sample, and like the rules above it buys nothing over a
+fixed $k$ chosen at the same cost. What it adds is a target set without
+labelled queries, which a fixed $k$ needs.
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{@{}llrrrr@{}}
+\toprule
+ & Oracle & Share & Speed-up & $\Delta$F1 vs full scan & $\Delta$F1 vs fixed $k$ \\
+\midrule
+20NG 10K & Qwen & 0.47 & 2.8$\times$ & $+0.000$ [$-0.004$, $+0.004$] & $-0.003$ [$-0.006$, $-0.000$] \\
+         & Kev  & 0.46 & 2.9$\times$ & $-0.010$ [$-0.016$, $-0.004$] & $-0.007$ [$-0.011$, $-0.004$] \\
+SYNERGY  & Qwen & 0.42 & 3.2$\times$ & $-0.004$ [$-0.016$, $+0.007$] & $-0.003$ [$-0.015$, $+0.008$] \\
+         & Kev  & 0.52 & 2.5$\times$ & $-0.004$ [$-0.021$, $+0.010$] & $-0.004$ [$-0.019$, $+0.008$] \\
+\bottomrule
+\end{tabular}
+\caption{A LOTUS-style cascade with embedding similarity as the proxy, 90\%
+targets and the bootstrap correction. Share: documents the oracle judges,
+including the sample. Speed-up: median over queries against the oracle scanning
+everything. Differences are paired over queries with 95\% intervals; fixed $k$
+classifies the same top $k$ for every query at the cascade's mean cost.}
+\label{tab:cascade}
+\end{table}
+
 \subsection{Threshold and query shape}
 \label{sec:threshold}
 
@@ -955,9 +1007,9 @@ elsewhere.
 
 \paragraph{Future work.}
 Query rewriting, where a strong model decomposes the request once and a cheap
-model executes it $N$ times; LOTUS-style cascades~\cite{patel2024lotus,
-kim2026semfilter} with a decision model as the oracle; agents with richer
-tools; and corpora that change, where the scan must be rerun on every update
+model executes it $N$ times; cascades with LOTUS's guarantees and
+Kim et al.'s shared oracle calls~\cite{patel2024lotus, kim2026semfilter},
+which our replay only approximates; agents with richer tools; and corpora that change, where the scan must be rerun on every update
 while an index amortises.
 
 % ---------------------------------------------------------------------------
@@ -985,8 +1037,8 @@ relevant papers found grows with the corpus.
 Code, submit files, raw rows and per-document scores are in the project
 repository. \texttt{src.access\_paths}, \texttt{src.crossover},
 \texttt{src.kev\_compare}, \texttt{src.baselines}, \texttt{src.agents\_compare},
-\texttt{src.synergy\_compare}, \texttt{src.listwise\_compare} and
-\texttt{src.scale\_compare} regenerate every replayed number from the saved
+\texttt{src.synergy\_compare}, \texttt{src.listwise\_compare},
+\texttt{src.cascade} and \texttt{src.scale\_compare} regenerate every replayed number from the saved
 scores without a GPU; \texttt{src.synergy\_build} rebuilds the SYNERGY texts.
 
 \bibliographystyle{plainnat}

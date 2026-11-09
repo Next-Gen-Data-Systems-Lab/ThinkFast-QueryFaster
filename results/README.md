@@ -56,12 +56,15 @@ All runs are on one H200 unless the file's `gpu` field says otherwise.
 
 | Files | What they will hold |
 |---|---|
-| `{20newsgroups,synergy}_agentkdryfull` | The strongest agent (chooses k, persistent) seeing 2,000 characters per result, k capped at 40 so prompts fit Qwen's 32K context (jobs 12439132-33). Read by `agents_compare`, `synergy_compare`. |
+| `{20newsgroups,synergy}_agentkdryfull` | The strongest agent (chooses k, persistent) seeing 2,000 characters per result, k capped at 40 so prompts fit Qwen's 32K context (jobs 12440595, 12440600). Read by `agents_compare`, `synergy_compare`. |
 | `arxiv_kev9b1m_packed` | Kev scanning all of arXiv 1M. Its full scores file is about 1 GB, over GitHub's 100 MB limit, so it is not committed; a compact copy will be. |
 
-Agent files from before Nov 8 (`agentdry`, `agentfull`, `agentk`, `agentkdry`,
-`agentkdryfull`) were replaced by reruns after a fix: an unusable reply used to
-end the run. The old versions are in git history.
+Agent and list-wise files from before Nov 8 (`agentdry`, `agentfull`, `agentk`,
+`agentkdry`, `agentkdryfull`, `listwise`) were replaced by reruns (jobs
+12440591-601, and 12440567 and 12440573 for list-wise) after two fixes: an unusable reply used to end the run, and vLLM's
+default CUDA graph setting garbled output past 8,192 tokens. A reply cut at the
+token limit now keeps its complete keep list. Rows now carry
+`cuda_graph`, `stop_reason` and `bad_prompt`. The old versions are in git history.
 
 ## Summaries
 
@@ -73,6 +76,7 @@ end the run. The old versions are in git history.
 | `baselines.json` | `python -m src.baselines` (all scorers, `tab:scorers`) |
 | `agents_compare.json` | `python -m src.agents_compare` (every agent against every scan, 20NG) |
 | `synergy_compare.json` | `python -m src.synergy_compare` |
+| `cascade.json` | `python -m src.cascade` (a LOTUS-style cascade replayed from the Qwen, Kev, MiniLM and embedding scores, `tab:cascade`) |
 | `listwise_compare.json` | `python -m src.listwise_compare` (list-wise against pointwise scan, and both against the agents) |
 | `scale_compare.json` | `python -m src.scale_compare` (arXiv) |
 | `index_costs.json` | `python -m src.index_costs` (HNSW against exact search) |

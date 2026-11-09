@@ -68,6 +68,7 @@ def env_stamp(args) -> dict:
         "embed_backend": args.embed_backend,
         "embed_model": args.embed_model,
         "prefix_caching": not args.no_prefix_cache,
+        "cuda_graph": args.cuda_graph,
     }
     for mod in ("torch", "vllm", "sentence_transformers"):
         try:
@@ -139,6 +140,12 @@ def main(argv=None):
     p.add_argument("--no-prefix-cache", action="store_true",
                    help="turn off vLLM prefix caching (vLLM 0.6.3 crashed with an "
                         "illegal memory access on list-wise SYNERGY prompts with it on)")
+    p.add_argument("--cuda-graph", choices=("default", "full", "eager"),
+                   default="full",
+                   help="vLLM CUDA graphs: full (the whole context, the default), "
+                        "default (vLLM's: up to 8,192 tokens) or eager (none). "
+                        "With vLLM's default, generation past 8,192 tokens came "
+                        "out as garbage (Nov 8); full and eager both fix it")
     p.add_argument("--agent-max-steps", type=int, default=8,
                    help="hard cap on agent search iterations")
     p.add_argument("--agent-concurrency", default="",
@@ -229,6 +236,7 @@ def main(argv=None):
                     gpu_memory_utilization=args.gpu_memory_utilization,
                     seed=args.seed,
                     prefix_caching=not args.no_prefix_cache,
+                    cuda_graph=args.cuda_graph,
                 )
                 print(f"[runner]   ready in {time.perf_counter()-t0:.1f}s", flush=True)
 

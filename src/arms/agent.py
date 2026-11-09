@@ -101,6 +101,9 @@ K_MIN = 5
 MAX_REPLY_TOKENS = 512
 # A reply that is not usable JSON is asked for again, not taken as a stop.
 PARSE_RETRIES = 2
+# A retry is sampled, so it is not a copy of the unusable reply (which greedy
+# decoding would repeat for an almost identical prompt).
+RETRY_TEMPERATURE = 0.7
 RETRY_NOTE = ("Your last reply was not one valid JSON object. Reply again with one JSON "
               "object only, in the format given above.")
 
@@ -151,7 +154,12 @@ class LocalChat:
         from vllm import SamplingParams
 
         prompts = [self._fit(m, max_tokens) for m in conversations]
-        params = SamplingParams(max_tokens=max_tokens, temperature=temperature)
+        # A conversation may ask for its own temperature (a retry does), seeded
+        # so that reruns repeat.
+        params = [SamplingParams(max_tokens=max_tokens,
+                                 temperature=m[0].get("temperature", temperature),
+                                 seed=m[0].get("seed"))
+                  for m in conversations]
         t0 = time.perf_counter()
         outs = self.llm.generate(prompts, params, use_tqdm=False)
         seconds = time.perf_counter() - t0
@@ -203,6 +211,35 @@ def parse_reply(text: str) -> dict | None:
     except json.JSONDecodeError:
         return None
     return obj if isinstance(obj, dict) else None
+
+
+# A search string salvaged from a cut reply is kept to this many characters.
+SALVAGE_CHARS = 300
+
+
+def salvage_reply(text: str) -> dict | None:
+    """What can be used from a reply cut at the token limit: a complete keep list
+    and the start of next_search (cut at a word, up to SALVAGE_CHARS). None if
+    either is missing. In practice the cut is a search string that runs on."""
+    m = re.search(r'"keep"\s*:\s*\[([\d,\s]*)\]', text)
+    if not m:
+        return None
+    rest = text[m.end():]
+    s = re.search(r'"next_search"\s*:\s*"([^"]*)', rest)
+    search = s.group(1).strip() if s else ""
+    if len(search) > SALVAGE_CHARS:
+        search = search[:SALVAGE_CHARS].rsplit(" ", 1)[0]
+    if not search:
+        return None
+    out = {"keep": [int(x) for x in re.findall(r"\d+", m.group(1))],
+           "next_search": search}
+    k = re.search(r'"k"\s*:\s*(\d+)', rest)
+    if k:
+        out["k"] = int(k.group(1))
+    mode = re.search(r'"search_type"\s*:\s*"(\w+)"', rest)
+    if mode:
+        out["search_type"] = mode.group(1)
+    return out
 
 
 def render_turn(query_text: str, kept: int, searches: list[str],
@@ -347,7 +384,7 @@ class SearchAgent:
         stats = {"steps": 0, "stopped_early": False, "gen_tokens": 0,
                  "prompt_tokens": 0, "llm_seconds": 0.0, "llm_calls": 0,
                  "parse_failures": 0, "keyword_searches": 0, "nudges": 0,
-                 "k_sum": 0, "cut_replies": 0, "stop_reason": "", "bad_replies": []}
+                 "k_sum": 0, "cut_replies": 0, "salvaged": 0, "stop_reason": "", "bad_replies": []}
         dry = 0          # searches in a row whose results the agent kept none of
         note = ""        # shown above the results: a nudge or a retry request
         counted = False  # the latest results already counted toward `dry`
@@ -355,10 +392,12 @@ class SearchAgent:
         bad = 0          # unusable replies in a row
 
         while True:
-            reply = yield [
-                {"role": "system", "content": system},
-                {"role": "user", "content": render_turn(
-                    query_text, len(kept), searches, results, note)}]
+            turn = render_turn(query_text, len(kept), searches, results, note)
+            head = {"role": "system", "content": system}
+            if bad:  # a retry: sampled, with a seed fixed by the step and attempt
+                head.update(temperature=RETRY_TEMPERATURE,
+                            seed=1000 * stats["steps"] + bad)
+            reply = yield [head, {"role": "user", "content": turn}]
             stats["llm_calls"] += 1
             stats["gen_tokens"] += reply.gen_tokens
             stats["prompt_tokens"] += reply.prompt_tokens
@@ -366,11 +405,17 @@ class SearchAgent:
             stats["cut_replies"] += reply.cut
 
             parsed = parse_reply(reply.text)
+            if parsed is None and reply.cut:
+                parsed = salvage_reply(reply.text)
+                stats["salvaged"] += parsed is not None
             if parsed is None:
                 # An unusable reply is not a request to stop: ask again.
                 stats["parse_failures"] += 1
                 if len(stats["bad_replies"]) < 3:
                     stats["bad_replies"].append(reply.text[:400])
+                if "bad_prompt" not in stats:  # the first prompt that got one
+                    stats["bad_prompt"] = turn
+                    stats["bad_prompt_tokens"] = reply.prompt_tokens
                 if bad < PARSE_RETRIES:
                     bad += 1
                     note = RETRY_NOTE
@@ -451,6 +496,8 @@ def package(agent: SearchAgent, tool: RetrievalTool, query, matches: set[str],
             "keyword_searches": float(stats.get("keyword_searches", 0)),
             "nudges": float(stats.get("nudges", 0)),
             "cut_replies": float(stats.get("cut_replies", 0)),
+            # cut replies whose keep list and search start were used
+            "salvaged_replies": float(stats.get("salvaged", 0)),
             # relevant documents the searches returned; tp is how many were kept
             "gold_seen": float(len(tool.returned & set(query.gold))),
             "mean_k": stats.get("k_sum", 0) / max(stats.get("steps", 0), 1),
@@ -466,6 +513,8 @@ def package(agent: SearchAgent, tool: RetrievalTool, query, matches: set[str],
             "stop_reason": stats.get("stop_reason", ""),
             # the first few unusable replies, to see what goes wrong
             "bad_replies": stats.get("bad_replies", []),
+            "bad_prompt": stats.get("bad_prompt", ""),
+            "bad_prompt_tokens": stats.get("bad_prompt_tokens", 0),
         },
     )
 

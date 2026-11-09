@@ -90,6 +90,11 @@ endif
 if !defined PREFIX_CACHE
   PREFIX_CACHE = on
 endif
+# full, default or eager: how far vLLM decodes in CUDA graphs (see runner.py).
+# vLLM's own default garbles generation past 8,192 tokens.
+if !defined CUDA_GRAPH
+  CUDA_GRAPH = full
+endif
 # Regular expression on the device name, e.g. GPU=H200 to keep runs comparable.
 if !defined GPU
   GPU = A100|H200
@@ -110,7 +115,7 @@ should_transfer_files   = YES
 when_to_transfer_output = ON_EXIT_OR_EVICT
 
 executable              = chtc/run_scan_vs_agent.sh
-arguments               = $(DATASET) $(MODEL) $(SIZES) $(BATCHES) $(K) $(TAG) $(ARMS) $(MAX_QUERIES) $(AGENT_STEPS) $(AGENT_CONCURRENCY) $(MAX_CHARS) $(AGENT_REPLICAS) $(AGENT_TOOLS) $(AGENT_STOP) $(AGENT_SNIPPET) $(AGENT_KMAX) $(LISTWISE_GROUP) $(PREFIX_CACHE)
+arguments               = $(DATASET) $(MODEL) $(SIZES) $(BATCHES) $(K) $(TAG) $(ARMS) $(MAX_QUERIES) $(AGENT_STEPS) $(AGENT_CONCURRENCY) $(MAX_CHARS) $(AGENT_REPLICAS) $(AGENT_TOOLS) $(AGENT_STOP) $(AGENT_SNIPPET) $(AGENT_KMAX) $(LISTWISE_GROUP) $(PREFIX_CACHE) $(CUDA_GRAPH)
 
 transfer_input_files    = src, data, chtc/run_scan_vs_agent.sh, requirements.txt
 transfer_output_files   = results, figs
