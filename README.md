@@ -1,7 +1,7 @@
 # Scan or search?
 
-**The question.** Some requests need *every* matching document: all studies for
-a medical review, all emails about a deal. An LLM can answer them two ways:
+**Question:** Some requests need *every* matching document: all studies for
+a medical review, all emails about a deal, all the courses that cover xyz topics from a corpus of UW Madison syllabus. An LLM can answer them two ways:
 
 - **Scan:** ask "does this document match?" of every document. It is slow on a
   big collection, but it never skips anything.
