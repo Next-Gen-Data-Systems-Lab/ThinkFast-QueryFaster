@@ -36,12 +36,16 @@ Keep this file and `README.md` updated with progress as work happens.
   Batched agents only tie it, at the agent's low recall. On arXiv up to 1M the
   agent reads about 200 papers whatever N is, so the scan's lead in papers found
   grows with N (done Nov 7; report Table `tab:scale`).
-- Ayesha's agent variants (done Nov 8, report `sec:freer`): longer snippets barely
-  help; choosing k is the strongest agent, and with the persistent stop rule it
-  ties the zero-shot Qwen scan, while Kev and a tuned threshold still win. The
-  agent keeps only about a third of the relevant documents it sees, the same rate
-  as the Qwen scan at t = 0.5. The list-wise scan ("no tools") is no faster than
-  pointwise and loses precision.
+- Ayesha's agent variants (rerun Nov 9 after the bug fixes, report `sec:freer`):
+  persistence and choosing k help most, full text helps on SYNERGY. The strongest
+  (choose k + persistent + full text, `agentkdryfull`) beats the zero-shot Qwen scan
+  at t = 0.5 (0.40 vs 0.31 on 20NG, 0.45 vs 0.32 on SYNERGY) but reads most of the
+  collection at about 20 docs/s, 250-350 s per query, several times a full scan.
+  A tuned threshold wins on 20NG and ties on SYNERGY; Kev wins both. The agent
+  keeps about a third of the relevant documents it sees, like the Qwen scan at
+  t = 0.5. The list-wise scan ("no tools") is no faster than pointwise and loses
+  precision. `agents_compare` and `synergy_compare` now report the held-out
+  threshold at equal time.
 
 ## Running on CHTC
 
@@ -93,8 +97,8 @@ MEMORY DISK`. `AVOID` is a regular expression on machine names to keep a job off
   dbrundage-/zliu-chtcgpu5000). Run one review per job on other machines, it
   crashed the same way on six reviews (Leenaars_2019, Leenaars_2020, Menon_2022,
   Muthu_2021, Wassenaar_2017, Wolters_2018), so it is the prompts, not the host.
-  Those prompts run past 8,192 tokens, so the likely cause is the CUDA graph bug
-  below; the Nov 8 rerun (job 12440573) has all 26 reviews with `CUDA_GRAPH=full`.
+  Those prompts run past 8,192 tokens, and the cause was the CUDA graph bug
+  below: the Nov 8 rerun (job 12440573) with `CUDA_GRAPH=full` ran all 26 reviews.
 - **vLLM garbage past 8,192 tokens:** vLLM 0.6.3 decodes in CUDA graphs up to
   `max_seq_len_to_capture` (8,192) and falls back past that, and the fallback
   produced word salad. It hit every agent given a context window over 8K (persistent,
@@ -116,6 +120,18 @@ MEMORY DISK`. `AVOID` is a regular expression on machine names to keep a job off
 - **Token budget:** `max_num_batched_tokens` defaults to 2048, which limits
   prefill-only work. The runner sets batch size x 512. Don't size it from
   `max_model_len`: at batch size 256 that means profiling a 524K-token step.
+
+- **Qwen3.5-9B (Kev's and JEV's backbone) as scan and agent:** needs
+  `IMAGE=v0.32.0 CUDA_MIN=13.0` (vLLM 0.32, CUDA 13). Only the gpu5000/gpu5001 H200s
+  have a 13.x driver; the others have 12.8, and no vLLM 0.32 image is built for
+  12.8. The `v0.32.0-cu129` image cannot import `vllm.LLM` (its torchcodec wants
+  `libnvrtc.so.13`). In that image sentence-transformers' pins clash, so the job
+  installs it without dependencies. The code turns off Qwen3.5's thinking
+  (`enable_thinking=False`), skips its vision encoder and reads yes/no
+  log-probabilities after the mask; vLLM 0.6.3 runs are unchanged. Jobs
+  12441712-15 (Nov 9, TAGs `q35`, `q35kdryfull`, 20NG and SYNERGY) mirror the
+  Qwen2.5 plain and strongest agents. Timings across vLLM versions are not
+  comparable, so compare the Qwen3.5 agent with the Qwen3.5 scan.
 
 ## Code notes
 
@@ -152,7 +168,9 @@ are archived in `docs/experiment-log.md` (not updated). `results/README.md` maps
 each results file to its experiment, script and report table: add a row when a new
 TAG lands. Teammates read the repo too, so keep stray test outputs out of `results/`. The midterm deck is
 https://claude.ai/artifact/E1R5FHuvJHniGchsHttgeE (10 slides plus 2 backups, with
-timed speaker notes, about 7 minutes; updated Nov 8 with the corrected headline,
-a decision-model scan beats every agent and zero-shot Qwen ties the strongest,
-and a slide on the freer agents). Its figure comes from
+timed speaker notes, about 7 minutes; updated Nov 9 from the reruns: a
+decision-model scan beats every agent, and the freed agents pass zero-shot Qwen
+only by reading most of the collection at 4-6 minutes per query). Its figure comes from
 `python -m src.paper_figs --slide`, which shows four agents (`SLIDE_AGENTS`).
+`--look plain` (stock matplotlib) or `--look xkcd` draws the same figure in another
+style, to `recall_time_<look>.{pdf,png}`.

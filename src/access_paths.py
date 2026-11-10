@@ -133,6 +133,18 @@ def rows_for(queries: list[Query], ks: list[int], t: float) -> dict:
             "precision": m[:, 1], "f1": m[:, 2]}
 
 
+def held_out_t(queries: list[Query]) -> list[float]:
+    """For each query, the threshold with the best mean F1 (whole corpus) over the others."""
+    f1 = np.array([[quality(q, q.n, t)[2] for t in THRESHOLDS] for q in queries])
+    return [THRESHOLDS[int(np.argmax(np.delete(f1, i, axis=0).mean(axis=0)))]
+            for i in range(len(queries))]
+
+
+def recall_at(queries: list[Query], ks: list[int], ts: list[float]) -> np.ndarray:
+    """Recall of each query scanned to depth k at its own threshold."""
+    return np.array([quality(q, k, t)[0] for q, k, t in zip(queries, ks, ts)])
+
+
 def plan_sample(queries: list[Query], alpha: float, t: float) -> dict:
     """Averaged over seeds. Sampled documents are paid for and may be kept."""
     acc = {"cost": 0.0, "recall": 0.0, "precision": 0.0, "f1": 0.0}

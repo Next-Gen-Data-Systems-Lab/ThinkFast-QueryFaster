@@ -35,11 +35,14 @@ right answers each found (recall).
 
 1. **A scan with a decision model beats every agent.** In the agent's own
    time, Kev finds far more of the answers on all three collections.
-2. **Agents quit early.** Even with thousands of answers, the agent reads a few
-   hundred documents and stops by choice, never at its step limit.
-3. **A stronger agent helps, but not enough.** Telling it to keep going and
-   letting it choose how many results to read raises its recall 2 to 3x. That
-   ties a plain Qwen scan, but Kev still wins by a wide margin.
+2. **Agents quit early.** Even with thousands of answers, the plain agent
+   reads about 200 documents and stops by choice, never at its step limit.
+3. **A freer agent turns into a slow scan.** Telling it to keep going, letting
+   it choose how many results to read and showing it full text raises its
+   recall 3 to 5x. It then beats a plain Qwen scan, but only by reading most of
+   the collection at an eighth of the scan's speed: 4 to 6 minutes per query,
+   several times as long as scanning everything. Qwen with a tuned threshold
+   wins or ties, and Kev wins by a wide margin.
 4. **The agent is only as good as its judgment.** Of the relevant documents it
    sees, it keeps about 1 in 3, the same share as the Qwen scan. More
    searching cannot fix that.
@@ -57,15 +60,17 @@ right answers each found (recall).
 
 Recall, with the scan given the agent's time on each query:
 
-| | Plain 7B agent | Strongest agent | Qwen scan | Kev scan |
-|---|---:|---:|---:|---:|
-| 20 Newsgroups, 10K | 0.09 | 0.28 | 0.30 (a tie) | 0.71 |
-| SYNERGY, 26 reviews | 0.16 | 0.29 | 0.31 (a tie) | 0.55 |
-| arXiv, 100K | 0.05 | 0.18 (persistent only) | 0.15 (a tie) | about 0.69 |
+| | Plain 7B agent | Strongest agent | Qwen scan | Qwen, tuned threshold | Kev scan |
+|---|---:|---:|---:|---:|---:|
+| 20 Newsgroups, 10K | 0.09 | 0.40 (346 s) | 0.31 | 0.63 | 0.78 |
+| SYNERGY, 26 reviews | 0.16 | 0.45 (253 s) | 0.32 | 0.44 (a tie) | 0.69 |
+| arXiv, 100K | 0.05 | 0.24 (132 s, persistent only) | 0.15 | 0.57 | about 0.78 |
 
-The Qwen and Kev columns use the strongest agent's time (the persistent agent's
-on arXiv). With a threshold tuned on other queries, the Qwen scan also beats
-every agent.
+The scan columns use the strongest agent's time on each query (the persistent
+agent's on arXiv), which is enough to scan almost the whole collection. On arXiv
+Qwen classified only each query's top 20K, and Kev's one-query-at-a-time speed
+is estimated from 20 Newsgroups. The tuned threshold is chosen on the other
+queries.
 
 In one line: when you need every answer, check every document with a model
 built for yes/no decisions, because an agent cannot tell what it missed.
@@ -83,19 +88,15 @@ built for yes/no decisions, because an agent cannot tell what it missed.
 
 ## Status
 
-- **Rerunning (Nov 8):** the newer agents (persistent, full text, choosing k, and
-  their combinations) and the list-wise scan. Two bugs cut those runs short:
-  a reply that was not valid JSON counted as a request to stop, and our serving
-  engine (vLLM 0.6.3) wrote garbage once a conversation passed 8,192 tokens.
-  Both are fixed; on SYNERGY the strongest agent with full text went from 0.12 to
-  0.43 recall. Findings 3 and 4, the table and the deck will be updated from the
-  reruns. The plain 7B, 32B and keyword agents never reached 8,192 tokens and
-  stand as they are.
+- **Reruns done (Nov 9):** the newer agents (persistent, full text, choosing k,
+  and their combinations) and the list-wise scan were rerun after fixing two
+  bugs: a reply that was not valid JSON counted as a request to stop, and our
+  serving engine (vLLM 0.6.3) wrote garbage once a conversation passed 8,192
+  tokens. The findings, table, report and deck use the reruns. The plain 7B, 32B
+  and keyword agents never reached 8,192 tokens and stand as they were.
 - **Failed, to retry:** Kev scanning all of arXiv at 1M hit the 24-hour limit
   after running out of memory; it needs more memory or splitting.
 - **To do:** rehearse the talk; compile the report on Overleaf.
-- **Known gap:** the list-wise scan covers 20 of the 26 SYNERGY reviews; vLLM
-  0.6.3 crashes on the long prompts of the other six.
 - **Not planned before Dec 7:** query rewriting, hosted Jev, corpora that change
   over time.
 

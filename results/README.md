@@ -47,8 +47,8 @@ All runs are on one H200 unless the file's `gpu` field says otherwise.
 | `synergy_<review>_{kev9b_packed,jev9b_separate,bge_separate,minilm_separate}` | Decision models and rerankers, one file per review. | `synergy_compare`, `baselines` | `sec:synergy`, `tab:scorers` |
 | `arxiv_scale` | arXiv at 10K, 100K and 1M: Qwen classifies each query's top 20K by embedding (`hybrid`, k = 20,000), plus the 7B agent. | `scale_compare`, `paper_figs` | `tab:scale`, `fig:time` |
 | `{20newsgroups,synergy}_agentfull` | 7B agent seeing 2,000 characters per result instead of 300 (`AGENT_SNIPPET=2000`). | `agents_compare`, `synergy_compare` | `tab:agents`, `sec:freer` |
-| `{20newsgroups,synergy}_agentk`, `_agentkdry` | 7B agent choosing k per search, 5 to 100 (`AGENT_KMAX=100`); `agentkdry` is also persistent, and is the strongest agent. Rows carry `n_gold_seen` and `n_mean_k`. | `agents_compare`, `synergy_compare` | `tab:agents`, `sec:freer` |
-| `{20newsgroups,synergy}_listwise` | List-wise scan: 20 documents per prompt, the model names the matches; scores are 0/1. SYNERGY has 20 of 26 reviews: vLLM crashed on the other six (see CLAUDE.md). | `listwise_compare` | `sec:freer` |
+| `{20newsgroups,synergy}_agentk`, `_agentkdry`, `_agentkdryfull` | 7B agent choosing k per search, 5 to 100 (`AGENT_KMAX=100`); `agentkdry` is also persistent; `agentkdryfull` also sees 2,000 characters per result with k capped at 40 so prompts fit Qwen's 32K context, and is the strongest agent. Rows carry `n_gold_seen` and `n_mean_k`. | `agents_compare`, `synergy_compare`, `paper_figs` | `tab:agents`, `sec:freer`, `fig:time` |
+| `{20newsgroups,synergy}_listwise` | List-wise scan: 20 documents per prompt, the model names the matches; scores are 0/1. All 26 SYNERGY reviews (the earlier crashes on six were the CUDA graph bug in CLAUDE.md). | `listwise_compare` | `sec:freer` |
 | `arxiv_kev9b_packed` | Kev scanning all of arXiv 100K, every query in one pass (job 12437631). | `paper_figs` (arXiv panel) | `sec:scale`, `fig:time` |
 | `*_embed_<N>.npz` | Embedding rankings for 20NG, logic, NFCorpus, each SYNERGY review and arXiv. The arXiv 1M file took 2 hours to compute on a laptop. | everything that replays | |
 
@@ -56,7 +56,6 @@ All runs are on one H200 unless the file's `gpu` field says otherwise.
 
 | Files | What they will hold |
 |---|---|
-| `{20newsgroups,synergy}_agentkdryfull` | The strongest agent (chooses k, persistent) seeing 2,000 characters per result, k capped at 40 so prompts fit Qwen's 32K context (jobs 12440595, 12440600). Read by `agents_compare`, `synergy_compare`. |
 | `arxiv_kev9b1m_packed` | Kev scanning all of arXiv 1M. Its full scores file is about 1 GB, over GitHub's 100 MB limit, so it is not committed; a compact copy will be. |
 
 Agent and list-wise files from before Nov 8 (`agentdry`, `agentfull`, `agentk`,
@@ -64,7 +63,8 @@ Agent and list-wise files from before Nov 8 (`agentdry`, `agentfull`, `agentk`,
 12440591-601, and 12440567 and 12440573 for list-wise) after two fixes: an unusable reply used to end the run, and vLLM's
 default CUDA graph setting garbled output past 8,192 tokens. A reply cut at the
 token limit now keeps its complete keep list. Rows now carry
-`cuda_graph`, `stop_reason` and `bad_prompt`. The old versions are in git history.
+`cuda_graph`, `stop_reason` and `bad_prompt`. The old versions are in git history
+and in `results_old_nov8/` on the access point.
 
 ## Summaries
 
@@ -74,7 +74,7 @@ token limit now keeps its complete keep list. Rows now carry
 | `crossover.json` | `python -m src.crossover` (exchange rates, equal time on 20NG) |
 | `kev_compare.json`, `jev_compare.json` | `python -m src.kev_compare [--model jev]` |
 | `baselines.json` | `python -m src.baselines` (all scorers, `tab:scorers`) |
-| `agents_compare.json` | `python -m src.agents_compare` (every agent against every scan, 20NG) |
+| `agents_compare.json` | `python -m src.agents_compare` (every agent against every scan, 20NG, at t = 0.5 and at the held-out threshold) |
 | `synergy_compare.json` | `python -m src.synergy_compare` |
 | `cascade.json` | `python -m src.cascade` (a LOTUS-style cascade replayed from the Qwen, Kev, MiniLM and embedding scores, `tab:cascade`) |
 | `listwise_compare.json` | `python -m src.listwise_compare` (list-wise against pointwise scan, and both against the agents) |

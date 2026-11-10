@@ -16,6 +16,11 @@
 #
 #   condor_submit ARMS=agent BATCHES=64 AGENT_CONCURRENCY=1,4,16 TAG=c chtc/scan_vs_agent.sub
 #
+# Qwen3.5 (the backbone of Kev and JEV) needs a newer vLLM than 0.6.3:
+#
+#   condor_submit IMAGE=v0.32.0 CUDA_MIN=13.0 MODEL=Qwen/Qwen3.5-9B \
+#       GPU='H200$' TAG=q35 ARMS=classify,agent BATCHES=32 SIZES=10000 chtc/scan_vs_agent.sub
+#
 # Keep comments on their own lines: condor_submit treats a trailing # as part
 # of the value.
 
@@ -95,6 +100,17 @@ endif
 if !defined CUDA_GRAPH
   CUDA_GRAPH = full
 endif
+# Tag of the vllm/vllm-openai image. 0.6.3 ran every Qwen2.5 result; Qwen3.5 needs
+# v0.32.0 (CUDA 13.0, so CUDA_MIN=13.0: on CHTC only the gpu5000/gpu5001 H200s). The
+# v0.32.0-cu129 image cannot import vllm.LLM: its torchcodec wants libnvrtc.so.13.
+# Timings across images are not comparable.
+if !defined IMAGE
+  IMAGE = v0.6.3
+endif
+# Lowest CUDA driver version the image runs on.
+if !defined CUDA_MIN
+  CUDA_MIN = 12.1
+endif
 # Regular expression on the device name, e.g. GPU=H200 to keep runs comparable.
 if !defined GPU
   GPU = A100|H200
@@ -106,7 +122,7 @@ if !defined AVOID
 endif
 
 universe                = container
-container_image         = docker://vllm/vllm-openai:v0.6.3
+container_image         = docker://vllm/vllm-openai:$(IMAGE)
 # The image's entrypoint is the vLLM API server. Without this, run_scan_vs_agent.sh is passed
 # to that server as an argument and never runs.
 docker_override_entrypoint = true
@@ -135,9 +151,10 @@ request_gpus            = 1
 # the variable this project is about, so ask for the big card.
 #
 # Capability bounds: bf16 needs 8.0+, and vLLM 0.6.3 predates anything past
-# 9.0. MIG slices are excluded because they are only part of a GPU. The image
+# 9.0 (the bound is kept for the newer image so timings stay on the same
+# GPUs). MIG slices are excluded because they are only part of a GPU. The image
 # is built on CUDA 12.1.
-requirements = (Target.CUDADriverVersion >= 12.1) && \
+requirements = (Target.CUDADriverVersion >= $(CUDA_MIN)) && \
                (Target.GPUs_GlobalMemoryMb >= 40000) && \
                (Target.GPUs_Capability >= 8.0) && (Target.GPUs_Capability <= 9.0) && \
                !regexp("MIG", Target.GPUs_DeviceName) && \

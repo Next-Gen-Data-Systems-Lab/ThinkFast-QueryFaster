@@ -16,6 +16,11 @@ export HF_HUB_ENABLE_HF_TRANSFER=1
 export VLLM_WORKER_MULTIPROC_METHOD=spawn
 export TOKENIZERS_PARALLELISM=false
 export SCIKIT_LEARN_DATA="$SCRATCH/sklearn_data"
+# The newer vLLM image compiles with torch inductor, which dies with "getpwuid(): uid
+# not found" because the job's uid has no passwd entry. Harmless on 0.6.3.
+export USER="${USER:-scan}" LOGNAME="${LOGNAME:-scan}"
+export TORCHINDUCTOR_CACHE_DIR="$SCRATCH/inductor" TRITON_CACHE_DIR="$SCRATCH/triton"
+export VLLM_CACHE_ROOT="$SCRATCH/vllm_cache"
 mkdir -p "$HOME" "$HF_HOME" "$SCIKIT_LEARN_DATA" results figs
 
 # HTCondor sets CUDA_VISIBLE_DEVICES to a GPU UUID, but vLLM 0.6.3 parses it as
@@ -40,9 +45,21 @@ if ! python3 -c "import sklearn, pandas, matplotlib, sentence_transformers, data
     echo "=== installing missing python packages ==="
     python3 -m pip list --format=freeze > "$SCRATCH/constraints.txt"
     grep -v '^vllm' requirements.txt > "$SCRATCH/requirements-job.txt"
-    python3 -m pip install -q --user \
-        -c "$SCRATCH/constraints.txt" -r "$SCRATCH/requirements-job.txt"
+    if ! python3 -m pip install --user \
+            -c "$SCRATCH/constraints.txt" -r "$SCRATCH/requirements-job.txt" \
+            > "$SCRATCH/pip.log" 2>&1; then
+        # On the newer vLLM image (v0.32) sentence-transformers' pins clash with the
+        # image's transformers and torch. The image has what it needs, so install
+        # it without dependencies and check that it imports.
+        echo "=== pip resolver conflict, the reason: ==="
+        grep -v "^\s*$" "$SCRATCH/pip.log" | tail -25
+        grep -v '^sentence-transformers' "$SCRATCH/requirements-job.txt" > "$SCRATCH/requirements-nost.txt"
+        python3 -m pip install -q --user -c "$SCRATCH/constraints.txt" \
+            -r "$SCRATCH/requirements-nost.txt" scipy
+        python3 -m pip install -q --user --no-deps "sentence-transformers>=3.0"
+    fi
 fi
+python3 -c "import vllm, transformers, sentence_transformers as st; from vllm import LLM; print('vllm', vllm.__version__, 'transformers', transformers.__version__, 'sentence-transformers', st.__version__)"
 
 # ---- arguments from the submit file -------------------------------------
 DATASET="${1:-20newsgroups}"

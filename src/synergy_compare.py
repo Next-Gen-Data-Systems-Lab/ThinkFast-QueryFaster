@@ -33,6 +33,10 @@ SCANS = {
     "kev": ("results/{d}_kev9b_packed.jsonl", "results/{d}_kev9b_packed.scores.jsonl"),
     "jev": ("results/{d}_jev9b_separate.jsonl", "results/{d}_jev9b_separate.scores.jsonl"),
 }
+# Qwen3.5-9B zero-shot (Kev's backbone, vLLM 0.32, TAG q35). Optional: a review is
+# skipped when any scan is missing, so it joins only once its rows exist.
+if Path("results/synergy_q35.jsonl").exists():
+    SCANS["qwen3.5"] = ("results/synergy_q35.jsonl", "results/synergy_q35.scores.jsonl")
 AGENTS = {
     "7B, embeddings": "results/synergy_qwen.jsonl",
     "7B, embeddings + BM25": "results/synergy_agent7b2t.jsonl",
@@ -43,6 +47,8 @@ AGENTS = {
     "7B, chooses k": "results/synergy_agentk.jsonl",
     "7B, chooses k, persistent": "results/synergy_agentkdry.jsonl",
     "7B, chooses k, persistent, full text": "results/synergy_agentkdryfull.jsonl",
+    "Qwen3.5-9B, embeddings": "results/synergy_q35.jsonl",
+    "Qwen3.5-9B, chooses k, persistent, full text": "results/synergy_q35kdryfull.jsonl",
 }
 
 
@@ -111,6 +117,7 @@ def analyse(c: dict) -> dict:
             "docs_per_s": float(np.mean(c["rate"][m])),
             "half": half.mean(axis=0).tolist(), "held": held.mean(axis=0).tolist(),
             "_half": half, "_held": held}
+    held_t = {m: AP.held_out_t(qs) for m, qs in c["queries"].items()}
     for a, rs in c["agents"].items():
         if any(r is None for r in rs):
             continue
@@ -136,13 +143,15 @@ def analyse(c: dict) -> dict:
                                            / max(np.sum([r.n_steps for r in rs]), 1))
         for m, qs in c["queries"].items():
             ks = [min(q.n, int(s * r)) for q, s, r in zip(qs, secs, c["rate"][m])]
-            for t_name, t in (("half", 0.5),):
-                plan = AP.rows_for(qs, ks, t)
-                entry["equal_time"][m] = {
-                    "share_of_pool": float(np.mean([k / q.n for k, q in zip(ks, qs)])),
-                    "recall": float(plan["recall"].mean()),
-                    "vs_agent": diff(plan["recall"], rec),
-                    "full_scan_vs_agent": diff(out["scans"][m]["_half"][:, 0], rec)}
+            plan = AP.rows_for(qs, ks, 0.5)
+            held = AP.recall_at(qs, ks, held_t[m])
+            entry["equal_time"][m] = {
+                "share_of_pool": float(np.mean([k / q.n for k, q in zip(ks, qs)])),
+                "recall": float(plan["recall"].mean()),
+                "vs_agent": diff(plan["recall"], rec),
+                "recall_held": float(held.mean()),
+                "held_vs_agent": diff(held, rec),
+                "full_scan_vs_agent": diff(out["scans"][m]["_half"][:, 0], rec)}
             entry["exchange_rate"] = {m: tau * float(np.mean(c["rate"][m])) for m in c["queries"]}
         out["agents"][a] = entry
     q, k, j = (out["scans"][m]["_held"][:, 2] for m in ("qwen", "kev", "jev"))
@@ -173,6 +182,7 @@ def show(r: dict) -> None:
         for m, x in e["equal_time"].items():
             print(f"    {m:4s} same time: {x['share_of_pool']:.0%} of pool, R {x['recall']:.3f}, "
                   f"vs agent {ci(x['vs_agent'])}; exchange rate {e['exchange_rate'][m]:.0f}")
+            print(f"         held-out t: R {x['recall_held']:.3f}, vs agent {ci(x['held_vs_agent'])}")
 
 
 def main(argv=None):

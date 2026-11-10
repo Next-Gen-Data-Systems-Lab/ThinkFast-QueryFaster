@@ -8,12 +8,18 @@ mean seconds and recall. One panel per dataset; arXiv (100K by default, see
 classified top 20K runs out. Everything is replayed from saved scores.
 
 Usage: python -m src.paper_figs --outdir paper/figs
+       python -m src.paper_figs --slide --look xkcd --outdir figs_alt
+
+--look plain draws with stock matplotlib and --look xkcd in xkcd's hand-drawn
+style; both write recall_time_<look>.{pdf,png} so the report's figure stays.
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
+import logging
 from pathlib import Path
 
 import matplotlib
@@ -29,6 +35,9 @@ from .crossover import RATE
 
 INK, MUTED = "#16202E", "#5A6675"
 COLOR = {"Qwen 7B": "#1F6FC4", "Kev-9B": "#1B8A5A", "JEV-9B": "#8E44AD", "agent": "#C2410C"}
+# matplotlib's own cycle, for the plain and xkcd looks.
+STOCK = {"Qwen 7B": "C0", "Kev-9B": "C2", "JEV-9B": "C4", "agent": "C3"}
+LOOKS = ("house", "plain", "xkcd")
 GRID = np.logspace(-0.5, 2.6, 60)        # seconds per query
 AGENT_STYLE = {   # marker, filled
     "7B, embeddings": ("o", True), "7B, embeddings + BM25": ("o", False),
@@ -39,7 +48,8 @@ AGENT_STYLE = {   # marker, filled
     "7B, chooses k, persistent, full text": ("^", False),
 }
 # A slide has room for fewer markers: the reference agents and the strongest.
-SLIDE_AGENTS = ("7B, embeddings", "32B, embeddings", "7B, persistent", "7B, chooses k, persistent")
+SLIDE_AGENTS = ("7B, embeddings", "32B, embeddings", "7B, persistent",
+                "7B, chooses k, persistent, full text")
 
 
 def style(ax) -> None:
@@ -126,39 +136,58 @@ def panel_arxiv(n: int = 1_000_000) -> tuple[str, dict, dict] | None:
 
 def figure(out: Path, arxiv_n: int = 100_000, panel_width: float = 3.4,
            height: float = 3.0, dpi: int = 200, dashed_note: bool = True,
-           only: tuple | None = None) -> None:
+           only: tuple | None = None, look: str = "house") -> None:
     panels = [p for p in (panel_20ng(), panel_synergy(), panel_arxiv(arxiv_n)) if p]
+    # plt.xkcd() falls back through xkcd fonts to Comic Sans MS, which macOS has;
+    # it warns once per text for each font it skips.
+    logging.getLogger("matplotlib.font_manager").setLevel(logging.ERROR)
+    with plt.xkcd(scale=0.8, length=120, randomness=2) if look == "xkcd" else contextlib.nullcontext():
+        draw(out, panels, panel_width, height, dpi, dashed_note, only, look)
+
+
+def draw(out, panels, panel_width, height, dpi, dashed_note, only, look) -> None:
+    house = look == "house"
+    color = COLOR if house else STOCK
+    ink, label = (INK, "#4A5564") if house else ("black", "black")
     fig, axes = plt.subplots(1, len(panels), figsize=(panel_width * len(panels), height), sharey=True)
     axes = np.atleast_1d(axes)
     for i, (ax, (title, curves, agents)) in enumerate(zip(axes, panels)):
         for name, y in curves.items():
             base = name.replace(", packed", "")
-            ax.plot(GRID, y, color=COLOR[base], linewidth=1.8,
+            ax.plot(GRID, y, color=color[base], linewidth=1.8,
                     linestyle="--" if "packed" in name else "-")
-            if "packed" in name and dashed_note and i == 0:
+            if "packed" in name and dashed_note and i == 0 and house:
                 # Ends where the separate curve ends, so label it in the empty
                 # lower right, below the plateaus and right of the agents.
                 ax.text(GRID[-1], 0.04, "dashed: Kev, one\npass for all queries",
-                        ha="right", va="bottom", fontsize=7.5, color=INK)
+                        ha="right", va="bottom", fontsize=7.5, color=ink)
             elif "packed" not in name or base not in curves:
                 last = np.flatnonzero(np.isfinite(y))[-1]
                 ax.annotate(base.replace("-9B", "").replace(" 7B", ""), (GRID[last], y[last]),
                             xytext=(3, 0), textcoords="offset points", va="center",
-                            fontsize=7.5, color=INK)
+                            fontsize=7.5, color=ink)
         for name, (secs, rec) in agents.items():
             if only is not None and name not in only:
                 continue
             marker, filled = AGENT_STYLE[name]
             ax.scatter([secs], [rec], s=40, marker=marker, zorder=4, linewidth=1.4,
-                       facecolor=COLOR["agent"] if filled else "white",
-                       edgecolor=COLOR["agent"],
+                       facecolor=color["agent"] if filled else "white",
+                       edgecolor=color["agent"],
                        label="Agent: " + name.replace(", embeddings", "").replace(" + BM25", " + BM25"))
         ax.set_xscale("log")
         ax.set_xlim(GRID[0], GRID[-1] * 3)
-        ax.set_title(title, fontsize=9.5, color=INK, loc="left")
-        ax.set_xlabel("Seconds per query", fontsize=8.5, color="#4A5564")
-        style(ax)
-    axes[0].set_ylabel("Recall", fontsize=8.5, color="#4A5564")
+        ax.set_title(title, fontsize=9.5, color=ink, loc="left")
+        ax.set_xlabel("Seconds per query", fontsize=8.5, color=label)
+        if house:
+            style(ax)
+        elif look == "xkcd":
+            # xkcd mode enlarges tick labels and thins the log ticks to two.
+            ax.spines[["top", "right"]].set_visible(False)
+            ax.set_xticks([1, 10, 100, 1000], ["1", "10", "100", "1000"])
+            ax.minorticks_off()
+            ax.set_yticks([0, 0.25, 0.5, 0.75])
+            ax.tick_params(labelsize=8)
+    axes[0].set_ylabel("Recall", fontsize=8.5, color=label)
     axes[0].set_ylim(0, 0.95)
     handles, labels = [], []
     for ax in axes:
@@ -166,12 +195,17 @@ def figure(out: Path, arxiv_n: int = 100_000, panel_width: float = 3.4,
             if l not in labels:
                 handles.append(h)
                 labels.append(l)
+    if dashed_note and not house:
+        # The comic font is wider, so the in-panel note would cover agent points.
+        handles.append(plt.Line2D([], [], color=color["Kev-9B"], linestyle="--", linewidth=1.8))
+        labels.append("Kev, one pass for all queries")
     fig.legend(handles, labels, frameon=False, fontsize=7.5, ncol=min(len(labels), 5),
                loc="lower center")
     fig.tight_layout(rect=(0, 0.1, 1, 1))
     out.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out / "recall_time.pdf")
-    fig.savefig(out / "recall_time.png", dpi=dpi)
+    stem = "recall_time" if house else f"recall_time_{look}"
+    fig.savefig(out / f"{stem}.pdf")
+    fig.savefig(out / f"{stem}.png", dpi=dpi)
     plt.close(fig)
 
 
@@ -183,13 +217,16 @@ def main(argv=None):
                    help="arXiv corpus size for the third panel (10000, 100000 or 1000000)")
     p.add_argument("--slide", action="store_true",
                    help="narrower panels at higher resolution, so the text is larger on a slide")
+    p.add_argument("--look", choices=LOOKS, default="house",
+                   help="house (the report's), plain (stock matplotlib) or xkcd")
     args = p.parse_args(argv)
     if args.slide:
         figure(Path(args.outdir), args.arxiv_n, panel_width=2.45, height=2.55, dpi=320,
-               dashed_note=False, only=SLIDE_AGENTS)
+               dashed_note=False, only=SLIDE_AGENTS, look=args.look)
     else:
-        figure(Path(args.outdir), args.arxiv_n)
-    print("wrote", Path(args.outdir) / "recall_time.pdf")
+        figure(Path(args.outdir), args.arxiv_n, look=args.look)
+    stem = "recall_time" if args.look == "house" else f"recall_time_{args.look}"
+    print("wrote", Path(args.outdir) / f"{stem}.pdf")
 
 
 if __name__ == "__main__":

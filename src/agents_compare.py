@@ -2,7 +2,8 @@
 
 The agent variants are a 2x2 of model (Qwen2.5-7B or 32B) and tools (embedding
 search alone, or with BM25 keyword search), all one query at a time with up to
-64 steps. For each, the scan in embedding order gets exactly that agent's
+64 steps, then the freer 7B agents and Qwen3.5-9B (Kev's backbone) as scan and
+agent. For each, the scan in embedding order gets exactly that agent's
 seconds on each query, at each scan model's measured documents per second
 (Kev packed only when all 20 queries arrive together). Differences in recall
 are paired over queries with a bootstrap 95% interval.
@@ -38,12 +39,18 @@ AGENTS = {
     "7B, chooses k": "results/20newsgroups_agentk.jsonl",
     "7B, chooses k, persistent": "results/20newsgroups_agentkdry.jsonl",
     "7B, chooses k, persistent, full text": "results/20newsgroups_agentkdryfull.jsonl",
+    # Qwen3.5-9B, the backbone of Kev and JEV, with thinking off, on vLLM 0.32
+    # (TAG q35, q35kdryfull). Compare it first with the Qwen3.5 scan below, which
+    # ran on the same vLLM; the other scans' timings come from other engines.
+    "Qwen3.5-9B, embeddings": "results/20newsgroups_q35.jsonl",
+    "Qwen3.5-9B, chooses k, persistent, full text": "results/20newsgroups_q35kdryfull.jsonl",
 }
 SCANS = {   # scores file, and how to get documents per second at each N
     "qwen": ("results/20newsgroups_sweep_bs32.scores.jsonl", None),
     "kev": ("results/20newsgroups_{kev}_packed.scores.jsonl", "results/20newsgroups_{kev}_separate.jsonl"),
     "kev packed": ("results/20newsgroups_{kev}_packed.scores.jsonl", "results/20newsgroups_{kev}_packed.jsonl"),
     "jev": ("results/20newsgroups_{jev}_separate.scores.jsonl", "results/20newsgroups_{jev}_separate.jsonl"),
+    "qwen3.5": ("results/20newsgroups_q35.scores.jsonl", "results/20newsgroups_q35.jsonl"),
 }
 SIZES = (1000, 5000, 10000)
 
@@ -115,11 +122,19 @@ def main(argv=None):
                 plan = AP.rows_for(qs, ks, 0.5)
                 agent_r = g.loc[[q.id for q in qs], "recall"].values
                 d, lo, hi = AP.paired(plan["recall"], agent_r)
+                # The same plan at a threshold chosen on the other queries.
+                held = AP.recall_at(qs, ks, AP.held_out_t(qs))
+                hd, hlo, hhi = AP.paired(held, agent_r)
                 entry["scans"][scan] = {"docs_per_s": docs_per_s, "recall": float(plan["recall"].mean()),
                                         "d": d, "lo": lo, "hi": hi,
                                         "wins": int((plan["recall"] > agent_r).sum()),
+                                        "recall_held": float(held.mean()),
+                                        "held": {"d": hd, "lo": hlo, "hi": hhi,
+                                                 "wins": int((held > agent_r).sum())},
                                         "exchange_rate": entry["s_per_call"] * docs_per_s}
                 line += f" | {scan} {plan['recall'].mean():.3f} ({d:+.3f} [{lo:+.3f}, {hi:+.3f}])"
+                if scan == "qwen":
+                    line += f" held-out {held.mean():.3f} ({hd:+.3f} [{hlo:+.3f}, {hhi:+.3f}])"
             print(line)
             out.append(entry)
     Path(args.out).write_text(json.dumps(out, indent=1))

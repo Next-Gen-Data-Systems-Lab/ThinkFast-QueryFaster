@@ -41,11 +41,14 @@ documents in embedding order with an open decision model finds more answers
 than every agent we tried, on 20 Newsgroups, SYNERGY and arXiv. The plain 7B
 agent loses to every scan: at 10,000 documents it reaches recall 0.09, against
 0.22 for the zero-shot scan with the same model and 0.43 for Kev-9B. Told to keep
-searching and allowed to choose how many results to read, the agent reaches
-0.28, which ties the zero-shot scan at its default threshold but not Kev (0.71)
-or the zero-shot scan with a tuned threshold. It keeps only about a third of the
-relevant documents its searches return, the same share as the scan built on the
-same model. Batching makes the agent as cheap as the scan, but not more
+searching, allowed to choose how many results to read and shown full text, the
+agent reaches 0.40 on 20 Newsgroups and 0.45 on the reviews, above the zero-shot
+scan at its default threshold, but only by reading most of the collection at an
+eighth of the scan's speed: 250--350 seconds per query, several times a complete
+scan. In that time Kev still finds far more (0.78 and 0.69), and the zero-shot
+scan with a tuned threshold wins or ties. The agent keeps only about a third of
+the relevant documents its searches return, the same share as the scan built on
+the same model. Batching makes the agent as cheap as the scan, but not more
 complete. Adding keyword search makes agents worse. BM25,
 embeddings and cross-encoder rerankers are far behind any LLM scan. Open
 decision models (Kev-9B, JEV-9B) beat the zero-shot scan on short topical and
@@ -199,7 +202,15 @@ the latest results (the top 20 by embedding similarity, as 300-character
 snippets, excluding anything already shown). It replies with a JSON object
 listing the results to keep and the next search query, or \texttt{null} to
 stop. It may take up to 64 steps; extra budget did not help, since at
-$N=10{,}000$ it stops by choice after about 10 steps.
+$N=10{,}000$ it stops by choice after about 10 steps. A reply that is not valid
+JSON is asked for again, up to twice, sampled at temperature 0.7. A reply cut at
+the 512-token cap, almost always a search string that runs on, keeps its
+complete keep list and the first 300 characters of its search. We serve with
+CUDA graphs covering the whole context window: with vLLM 0.6.3's default, any
+generation past 8,192 tokens of prompt and reply came out as word salad. That
+never touched the scan, which decodes one token, or the plain agents, whose
+window is 4,096 tokens, but it cut short every agent of \S\ref{sec:freer} until
+we found it (on SYNERGY, recall 0.12 with the default against 0.43 without).
 
 \paragraph{Stronger agents.}
 Two changes test whether the agent is a strawman. A second tool,
@@ -489,29 +500,34 @@ second tool (\S\ref{sec:synergy}).
 \begin{table}[t]
 \centering
 \small
-\begin{tabular}{@{}lrrrrrrrr@{}}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lrrrrrrrrrr@{}}
 \toprule
-& \multicolumn{4}{c}{20 Newsgroups, $N=10{,}000$} & \multicolumn{4}{c}{SYNERGY, 26 reviews} \\
-\cmidrule(lr){2-5}\cmidrule(lr){6-9}
-Agent & Agent & Qwen & Kev & JEV & Agent & Qwen & Kev & JEV \\
+& \multicolumn{5}{c}{20 Newsgroups, $N=10{,}000$} & \multicolumn{5}{c}{SYNERGY, 26 reviews} \\
+\cmidrule(lr){2-6}\cmidrule(lr){7-11}
+Agent & Agent & Qwen & tuned & Kev & JEV & Agent & Qwen & tuned & Kev & JEV \\
 \midrule
-7B & 0.09 & 0.22 & 0.43 & 0.38 & 0.16 & 0.26 & 0.37 & 0.21 \\
-7B + BM25 & 0.10 & 0.24 & 0.49 & 0.41 & 0.13 & 0.29 & 0.46 & 0.28 \\
-32B & 0.17 & 0.29 & 0.68 & 0.57 & 0.21 & 0.32 & 0.62 & 0.40 \\
-32B + BM25 & 0.13 & 0.29 & 0.63 & 0.54 & 0.16 & 0.31 & 0.55 & 0.34 \\
+7B & 0.09 & 0.22 & 0.42 & 0.43 & 0.38 & 0.16 & 0.26 & 0.35 & 0.37 & 0.21 \\
+7B + BM25 & 0.10 & 0.24 & 0.46 & 0.49 & 0.41 & 0.13 & 0.29 & 0.38 & 0.46 & 0.28 \\
+32B & 0.17 & 0.29 & 0.58 & 0.68 & 0.57 & 0.21 & 0.32 & 0.42 & 0.62 & 0.40 \\
+32B + BM25 & 0.13 & 0.29 & 0.56 & 0.63 & 0.54 & 0.16 & 0.31 & 0.41 & 0.55 & 0.34 \\
 \midrule
-7B, persistent & 0.22 & 0.29 & 0.65 & 0.55 & 0.26 & 0.31 & 0.52 & 0.33 \\
-7B, full text & 0.10 & 0.23 & 0.47 & 0.41 & 0.19 & 0.28 & 0.44 & 0.28 \\
-7B, chooses $k$ & 0.23 & 0.29 & 0.64 & 0.54 & 0.23 & 0.31 & 0.54 & 0.34 \\
-7B, chooses $k$, persistent & 0.28 & 0.30 & 0.71 & 0.59 & 0.29 & 0.31 & 0.55 & 0.35 \\
+7B, persistent & 0.24 & 0.30 & 0.59 & 0.69 & 0.58 & 0.27 & 0.32 & 0.42 & 0.59 & 0.38 \\
+7B, full text & 0.11 & 0.23 & 0.45 & 0.49 & 0.43 & 0.29 & 0.29 & 0.39 & 0.54 & 0.34 \\
+7B, chooses $k$ & 0.26 & 0.30 & 0.60 & 0.71 & 0.59 & 0.24 & 0.32 & 0.43 & 0.62 & 0.40 \\
+\quad + persistent & 0.32 & 0.31 & 0.63 & 0.78 & 0.63 & 0.32 & 0.32 & 0.44 & 0.69 & 0.44 \\
+\quad + persistent, full text & \textbf{0.40} & 0.31 & 0.63 & 0.78 & 0.63 & \textbf{0.45} & 0.32 & 0.44 & 0.69 & 0.45 \\
 \bottomrule
 \end{tabular}
 \caption{Recall of each agent, and of each scan model given that agent's
-seconds on each query, reading documents in embedding order ($t=0.5$). The
+seconds on each query, reading documents in embedding order ($t=0.5$;
+\emph{tuned}: the Qwen scan at the threshold chosen on the other queries). The
 lower block is the 7B agent with the options of \S\ref{sec:freer}. Kev is one
 query at a time here; with one pass for all 20 queries it reaches 0.67--0.78 on
-20 Newsgroups. Steps take 0.40--0.67\,s for the 7B agents and 1.36--1.54\,s for
-32B.}
+20 Newsgroups. Steps take 0.40--0.45\,s for the plain 7B agents, up to 1.9\,s
+for the freer ones as their prompts grow, and 1.36--1.54\,s for 32B. The last two
+rows take 160--360\,s per query, enough for each scan to read 80--100\% of the
+collection.}
 \label{tab:agents}
 \end{table}
 
@@ -523,8 +539,8 @@ documents in embedding order at its measured rate ($t=0.5$); dashed, Kev with
 one pass for all queries. Points: the agents of Table~\ref{tab:agents}. On
 arXiv (100K papers, \S\ref{sec:scale}) the Qwen curve ends at 140 seconds,
 where the classified top 20,000 runs out, and only the plain and persistent 7B
-agents were run. Every agent lies below every decision-model curve; the
-strongest agents reach the zero-shot Qwen curve.}
+agents were run. Every agent lies below the Kev curve; the strongest agents
+pass the zero-shot Qwen curve only after it has read the whole collection.}
 \label{fig:time}
 \end{figure}
 
@@ -554,46 +570,63 @@ The lower block of Table~\ref{tab:agents} gives the 7B agent the options of
 \S\ref{sec:arms} in turn, on 20 Newsgroups ($N=10{,}000$) and SYNERGY.
 
 \paragraph{Stopping was a large part of the problem.}
-Told to persist, the agent's recall rises from 0.09 to 0.22 on 20 Newsgroups
-(46 steps instead of 10, 20.6\,s instead of 5.0\,s), from 0.16 to 0.26 on
-SYNERGY, and from 0.05 to 0.18 on arXiv (\S\ref{sec:scale}). It still stops by
-choice on every query, after about one refused stop on average.
+Told to persist, the agent's recall rises from 0.09 to 0.24 on 20 Newsgroups
+(57 steps instead of 10, 48\,s instead of 5.0\,s), from 0.16 to 0.27 on SYNERGY
+(79\,s), and from 0.05 to 0.24 on arXiv (\S\ref{sec:scale}). Most runs still end
+by the agent's choice (18 of 20 and 23 of 26), after about one refused stop.
 
-\paragraph{Snippet length was not.}
-Full text adds 0.01 recall on 20 Newsgroups and 0.03 on SYNERGY, at 1.5 times
-the seconds.
+\paragraph{Full text matters for long criteria.}
+Full text adds 0.03 recall on 20 Newsgroups (0.11, in 9.3\,s) but 0.14 on SYNERGY
+(0.29, in 36\,s), where eligibility often turns on details past an abstract's
+first 300 characters.
 
-\paragraph{Choosing $k$ is the largest single gain.}
-The agent asks for about 47 results per search instead of 20 and, on SYNERGY,
-reads 1,065 records per review instead of 219. Recall rises to 0.23 on both
-datasets, at 3 to 4 times the seconds; precision on SYNERGY falls from 0.34 to
-0.19. With persistence as well it reaches 0.28 and 0.29 in 33\,s and 21\,s, the
-strongest agents we ran. In their time the zero-shot scan at $t=0.5$ only ties
-them ($+0.02$\ci{-0.05}{0.10} on 20 Newsgroups, $+0.03$\ci{-0.05}{0.11} on
-SYNERGY), but Kev still wins ($+0.43$\ci{0.37}{0.48} and $+0.27$\ci{0.16}{0.38}),
-and so does the zero-shot scan with the threshold chosen on the other queries
-($+0.32$\ci{0.27}{0.38} and $+0.13$\ci{0.04}{0.23}).
+\paragraph{Choosing $k$ lets the agent read more.}
+The agent asks for about 45 results per search instead of 20 and sees about
+1,900 documents per query on 20 Newsgroups and 1,660 records per review on
+SYNERGY, against about 200. Recall rises to 0.26 and 0.24 at 8 to 10 times the
+seconds, and precision falls (0.73 to 0.49; 0.34 to 0.17). With persistence as
+well the agent reaches 0.32 on both, and with full text too 0.40 and 0.45, the
+strongest agents we ran.
+
+\paragraph{The strongest agents become slow scans.}
+Persistent and choosing $k$, the agent keeps searching until searches return
+nothing new, so it sees most of the collection (a median of 100\% on both
+datasets with snippets; 76\% and 100\% with full text), at 14--26 documents per second
+against the scan's 109--170. A query then takes 160--360\,s, three to six times
+a complete Qwen scan (about 60\,s on both datasets), and in that time each
+scan reads 80--100\% of the collection. The zero-shot scan at $t=0.5$ ties the
+agent that chooses $k$ and persists ($-0.01$\ci{-0.08}{0.06} on 20 Newsgroups,
+$-0.00$\ci{-0.08}{0.08} on SYNERGY) and loses to the one that also reads full
+text ($-0.09$\ci{-0.16}{-0.03} and $-0.12$\ci{-0.22}{-0.03}): reading full
+text, the agent accepts more than the scan's default threshold does, at precision
+0.21 and 0.11 against the scan's 0.76 and 0.43. With the threshold chosen on the
+other queries the zero-shot scan wins on 20 Newsgroups ($+0.22$\ci{0.16}{0.28})
+and ties on SYNERGY ($-0.01$\ci{-0.10}{0.09}, at precision 0.37). Kev wins on
+both ($+0.38$\ci{0.30}{0.44} and $+0.24$\ci{0.11}{0.36}), and JEV wins on 20
+Newsgroups ($+0.23$\ci{0.14}{0.30}) and ties on SYNERGY. About 18\% of these
+agents' replies reached the 512-token cap with a runaway search string; their
+keep lists were used (\S\ref{sec:arms}). Only 4 of 250 runs ended on a reply
+that could not be parsed.
 
 \paragraph{Judgment, not search, caps the agent.}
-Of the relevant documents its searches return, the agent keeps 36--38\% on 20
-Newsgroups and 20--41\% on SYNERGY. The scan built on the same model keeps 31\%
-and 32\% at $t=0.5$. Searching longer or wider shows the agent more relevant
-documents, but its decisions are no more generous than the zero-shot scan's,
-and unlike the scan's they have no threshold to lower.
+Of the relevant documents its searches return, the agent keeps 33--42\% on 20
+Newsgroups and 19--38\% on SYNERGY, the most with full text. The scan built on
+the same model keeps 31\% and 32\% at $t=0.5$. Searching longer or wider shows
+the agent more relevant documents, but its decisions are about as strict as the
+zero-shot scan's, and unlike the scan's they have no threshold to lower.
 
-\paragraph{An LLM without search is a slower, less precise scan.}
-On 20 Newsgroups the list-wise scan reads 170 documents per second, the same as
+\paragraph{An LLM without search is a less precise scan.}
+On 20 Newsgroups the list-wise scan reads 171 documents per second, the same as
 the pointwise scan, since both read every document once. Its recall is the same
-(0.34 against 0.31, $+0.03$\ci{-0.03}{0.08}), but it names 733 documents per
-query for 500 relevant ones, so precision falls from 0.76 to 0.25 and F1 by
+(0.34 against 0.31, $+0.03$\ci{-0.03}{0.08}), but it names 733 documents
+per query for 500 relevant ones, so precision falls from 0.76 to 0.25 and F1 by
 0.14\ci{0.09}{0.18}, worse on 19 of 20 queries. Only 20 of its 10,000 replies
-failed to parse. On SYNERGY it ran on 20 of the 26 reviews (on the other six,
-vLLM 0.6.3 crashed with an illegal memory access on the long prompts, on several
-machines). It again reads as fast as the pointwise scan (119 against 114
-documents per second). It accepts more: recall 0.43 against 0.35
-($+0.09$\ci{0.00}{0.16}), but precision falls from 0.36 to 0.10 and F1 by
-0.18\ci{0.07}{0.26}. Accepting more is what a lower threshold does for the
-pointwise scan, which can choose that trade-off; the list-wise scan cannot.
+failed to parse. On SYNERGY, now on all 26 reviews, it is slightly slower than the
+pointwise scan (97 against 109 documents per second) and accepts more: recall
+0.48 against 0.32 ($+0.15$\ci{0.09}{0.22}, better on 21 of 26), but precision
+falls from 0.43 to 0.12 and F1 by 0.15\ci{0.07}{0.23}. Accepting more is what a
+lower threshold does for the pointwise scan, which can choose that trade-off;
+the list-wise scan cannot.
 
 \subsection{Adaptive $k$ does not beat fixed $k$}
 \label{sec:adaptive}
@@ -930,17 +963,19 @@ documents it reports a median of 51 papers for queries with thousands of
 answers.
 
 \paragraph{A persistent agent and a decision model at 100K.}
-Told to persist, the 7B agent at $N=100{,}000$ takes 44 steps and 30\,s and
-reaches recall 0.18 (224 relevant papers found, against 44). In its time the
-zero-shot scan at $t=0.5$ ties it (0.15, $-0.03$\ci{-0.08}{0.02}), and with the
-tuned threshold wins ($+0.36$\ci{0.30}{0.42}). Kev scanned the whole 100K sample
+Told to persist, the 7B agent at $N=100{,}000$ takes 94 steps and 132\,s and
+reaches recall 0.24 (380 relevant papers found, against 44), still seeing only
+2\% of the papers. In its time the zero-shot scan at $t=0.5$ loses
+($0.15$, $-0.09$\ci{-0.14}{-0.04}): it classified only each query's top 20,000,
+which runs out at 140\,s, and at $t=0.5$ it is conservative. With the tuned
+threshold it wins on all 20 queries ($+0.33$\ci{0.28}{0.39}). Kev scanned the whole 100K sample
 with all 20 queries in one pass (66 minutes, 550 documents per second per
 query), reaching recall 0.90 at precision 0.32 ($t=0.5$; best F1 0.59 at
 $t=0.9$). In the agents' time it wins on all 20 queries: $+0.61$\ci{0.54}{0.68}
-against the plain agent and $+0.68$\ci{0.64}{0.73} against the persistent one.
+against the plain agent and $+0.63$\ci{0.58}{0.68} against the persistent one.
 One query at a time, at a rate estimated from 20 Newsgroups' ratio of separate to
 packed throughput (123 documents per second), it still wins by $+0.29$ and
-$+0.52$.
+$+0.54$\ci{0.48}{0.60}.
 
 \paragraph{Calibration decides the small corpus.}
 At $t=0.5$ the zero-shot scan is as conservative as on 20 Newsgroups
@@ -985,9 +1020,11 @@ lost recall, and arms are compared at equal cost rather than equal effort.
 We also gave the agent the strongest upgrades we could run: keyword search as a
 second tool, a model four times larger, a rule against stopping early, full
 text, and control over how many results each search returns. Persistence and
-control over $k$ help most, and together bring the agent level with the
-zero-shot scan at its default threshold, but no agent comes near a
-decision-model scan, and keyword search makes the gap wider. Other tools (metadata filters, or a tool that runs the
+control over $k$ help most. With full text as well, the agent passes the
+zero-shot scan at its default threshold, but by then it reads most of the
+collection, several times more slowly than the scan, so it has become a slow
+scan with no threshold to tune. No agent comes near a decision-model scan, and
+keyword search makes the gap wider. Other tools (metadata filters, or a tool that runs the
 classifier on a batch) remain untested; the second is a hybrid in agent form.
 
 \paragraph{Limitations.}
@@ -1019,11 +1056,13 @@ For find-all queries, scanning beats searching whenever an agent step costs
 more than about a dozen classifier decisions. On one GPU, one query at a time, a
 step costs 48--230 of them, depending on the agent and the corpus. A scan in
 embedding order with an open decision model beat every agent we tried, on 20
-Newsgroups, 26 real systematic reviews and arXiv. A zero-shot scan at its
-default threshold ties the strongest agents, which persist and choose how much
-to read, and beats them once its threshold is tuned. Agents fall short for two
-reasons: they stop by choice, and they keep only about a third of the relevant
-documents they see, no more than the scan built on the same model. Batching agents closes the cost gap but not the recall gap;
+Newsgroups, 26 real systematic reviews and arXiv. The strongest agents, which
+persist, choose how much to read and see full text, pass a zero-shot scan at its
+default threshold, but only by reading most of the collection at an eighth of
+the scan's speed; with a tuned threshold the zero-shot scan wins or ties. Agents
+fall short for two reasons: they stop by choice, and they keep only about a
+third of the relevant documents they see, no more than the scan built on the
+same model. Batching agents closes the cost gap but not the recall gap;
 a larger agent costs more than it gains; keyword search hurts. Choosing scan
 depth per query buys little over a fixed depth. Cheap scorers are no substitute
 for an LLM, and the scan's weakness in our first experiments, low recall from a

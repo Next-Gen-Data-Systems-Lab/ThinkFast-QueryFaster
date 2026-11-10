@@ -123,15 +123,17 @@ class LocalChat:
     def __init__(self, decision_model):
         self.llm = decision_model.llm
         self.tok = decision_model.tok
-        self.max_len = self.llm.llm_engine.model_config.max_model_len
+        self.max_len = decision_model.max_model_len
         self.truncated = 0      # prompts cut to fit the context window
 
     def _fit(self, messages: list[dict], max_tokens: int) -> str:
         """The prompt, with the end of the last message cut if it would not fit.
         Results and documents come last, so a cut drops the last ones shown."""
+        from .classify import TEMPLATE_KW
+
         limit = self.max_len - max_tokens - 8
         prompt = self.tok.apply_chat_template(messages, tokenize=False,
-                                              add_generation_prompt=True)
+                                              add_generation_prompt=True, **TEMPLATE_KW)
         if len(self.tok.encode(prompt)) <= limit:
             return prompt
         self.truncated += 1
@@ -140,7 +142,8 @@ class LocalChat:
             body = body[: int(len(body) * 0.9)]
             cut = [*messages[:-1], {**messages[-1], "content": body}]
             prompt = self.tok.apply_chat_template(cut, tokenize=False,
-                                                  add_generation_prompt=True)
+                                                  add_generation_prompt=True,
+                                                  **TEMPLATE_KW)
             if len(self.tok.encode(prompt)) <= limit:
                 return prompt
 

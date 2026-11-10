@@ -44,6 +44,17 @@ PROMPT = (
 )
 
 
+def vllm_v1() -> bool:
+    """True on the newer vLLM image (v0.32) used for Qwen3.5, False on 0.6.3."""
+    import vllm
+    major, minor = (int(x) for x in vllm.__version__.split(".")[:2])
+    return (major, minor) >= (0, 10)
+
+
+# Qwen3.5 thinks before answering unless told not to; other templates ignore this.
+TEMPLATE_KW = {"enable_thinking": False}
+
+
 def peak_gpu_mb() -> float:
     try:
         import torch
@@ -77,6 +88,23 @@ class DecisionModel:
 
         self.model_name = model
         self.max_num_seqs = max_num_seqs
+        self.max_model_len = max_model_len
+        if vllm_v1():
+            extra = {
+                # The 8,192-token CUDA-graph bug was in 0.6.3; the newer engine
+                # has no max_seq_len_to_capture and needs no workaround.
+                # Qwen3.5 is a vision-language model: skip the vision encoder.
+                "language_model_only": True,
+                # Log probabilities after the yes/no mask, as 0.6.3 returned them,
+                # so the top 20 always hold both answers.
+                "logprobs_mode": "processed_logprobs",
+            }
+        else:
+            # vLLM 0.6.3 decodes in CUDA graphs up to 8,192 tokens and eagerly
+            # past that, and past that its output came out as garbage. "full"
+            # covers the whole context, "eager" uses no graphs; both fix it.
+            extra = ({"max_seq_len_to_capture": max_model_len}
+                     if cuda_graph == "full" else {})
         t0 = time.perf_counter()
         self.llm = LLM(
             model=model,
@@ -87,16 +115,12 @@ class DecisionModel:
             dtype=dtype,
             seed=seed,
             enable_prefix_caching=prefix_caching,
-            # vLLM 0.6.3 decodes in CUDA graphs up to 8,192 tokens and eagerly
-            # past that, and past that its output came out as garbage. "full"
-            # covers the whole context, "eager" uses no graphs; both fix it.
             enforce_eager=cuda_graph == "eager",
-            **({"max_seq_len_to_capture": max_model_len}
-               if cuda_graph == "full" else {}),
             # vLLM refuses prefix caching if a model declares a sliding window,
             # as Phi-3.5 does. Our context is far shorter than any such window.
             disable_sliding_window=True,
             disable_log_stats=True,
+            **extra,
         )
         self.load_s = time.perf_counter() - t0
         self.tok = self.llm.get_tokenizer()
@@ -122,7 +146,7 @@ class DecisionModel:
         try:
             return self.tok.apply_chat_template(
                 [{"role": "user", "content": body}],
-                tokenize=False, add_generation_prompt=True,
+                tokenize=False, add_generation_prompt=True, **TEMPLATE_KW,
             )
         except Exception:
             return body + "\nAnswer:"
